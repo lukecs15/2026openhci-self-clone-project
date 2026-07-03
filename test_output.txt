@@ -1,0 +1,13 @@
+Python: 3.10.5 (tags/v3.10.5:f377153, Jun  6 2022, 16:14:13) [MSC v.1929 64 bit (AMD64)]
+CWD: C:\Users\User\Desktop\drawing_to_3d\backend
+
+OK  config
+OK  models.schemas
+OK  services.rag_service
+OK  services.gemini_service
+OK  services.local_3d_service
+OK  services.meshy_service
+OK  routers.image_to_3d
+OK  routers.chat
+OK  routers.personality
+OK  main
