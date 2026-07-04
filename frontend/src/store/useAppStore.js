@@ -6,6 +6,7 @@
  * - 生成的 3D 模型 URL 與任務狀態
  * - 人格分析結果
  * - 對話 session ID
+ * - 語音對話場景狀態（voiceSession）
  * - 全域 loading 與錯誤狀態
  */
 
@@ -75,6 +76,74 @@ const useAppStore = create((set, get) => ({
   setError: (error) => set({ error }),
   clearError: () => set({ error: null }),
 
+  // ── 語音對話場景 ──────────────────────────────
+  /**
+   * voiceSession — 語音場景的完整狀態
+   *
+   * objects: 場景中的物件列表
+   *   每個物件：{ object_id, object_name, object_description, model_url, personality }
+   *   status: 'idle' | 'talking' | 'listening'（由 VoiceScene 管理，不存 store）
+   *
+   * voiceProfiles: { [objectId]: VoiceProfile }（後端建立後由前端快取）
+   */
+  voiceSession: {
+    sessionId: uuidv4(),
+    objects: [],              // ObjectPersona[]
+    sceneMode: 'spatial',     // 'spatial' | 'abstract'
+    exchangeCount: 0,
+    canEnd: false,
+    isUserSpeaking: false,
+    voiceProfiles: {},        // { objectId: VoiceProfile }
+  },
+
+  /** 設定語音場景物件列表（覆蓋整個 objects 陣列） */
+  setVoiceObjects: (objects) =>
+    set((state) => ({
+      voiceSession: { ...state.voiceSession, objects },
+    })),
+
+  /** 新增單一物件到場景 */
+  addVoiceObject: (object) =>
+    set((state) => ({
+      voiceSession: {
+        ...state.voiceSession,
+        objects: [...state.voiceSession.objects, object],
+      },
+    })),
+
+  /** 儲存 VoiceProfile（後端 clone 後回傳） */
+  setVoiceProfile: (objectId, profile) =>
+    set((state) => ({
+      voiceSession: {
+        ...state.voiceSession,
+        voiceProfiles: { ...state.voiceSession.voiceProfiles, [objectId]: profile },
+      },
+    })),
+
+  /** 切換場景模式 */
+  setSceneMode: (sceneMode) =>
+    set((state) => ({
+      voiceSession: { ...state.voiceSession, sceneMode },
+    })),
+
+  /** 更新 voiceSession 的任意欄位（by WebSocket 回傳資料） */
+  setVoiceSession: (updates) =>
+    set((state) => ({
+      voiceSession: { ...state.voiceSession, ...updates },
+    })),
+
+  /** 開始新的語音 session（重置計數器） */
+  newVoiceSession: () =>
+    set((state) => ({
+      voiceSession: {
+        ...state.voiceSession,
+        sessionId: uuidv4(),
+        exchangeCount: 0,
+        canEnd: false,
+        isUserSpeaking: false,
+      },
+    })),
+
   // ── 重置全部 ──────────────────────────────────
   resetAll: () => {
     const prev = get().imagePreviewUrl
@@ -91,6 +160,15 @@ const useAppStore = create((set, get) => ({
       sessionId: uuidv4(),
       isLoading: false,
       error: null,
+      voiceSession: {
+        sessionId: uuidv4(),
+        objects: [],
+        sceneMode: 'spatial',
+        exchangeCount: 0,
+        canEnd: false,
+        isUserSpeaking: false,
+        voiceProfiles: {},
+      },
     })
   },
 }))

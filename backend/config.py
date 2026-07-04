@@ -37,6 +37,23 @@ class Settings(BaseSettings):
     # 本地 GLB 輸出目錄（相對於 backend/）
     local_output_dir: str = "outputs"
 
+    # ── 語音設定 ──────────────────────────────────
+    # ElevenLabs（雲端 TTS 備用，留空則純本地）
+    elevenlabs_api_key: str = ""
+
+    # faster-whisper STT 模型大小：tiny / base / small / medium / large
+    whisper_model: str = "medium"
+
+    # F5-TTS 模型路徑（留空自動下載，約 3GB）
+    f5tts_model_path: str = ""
+
+    # 語音樣本上傳目錄（相對於 backend/）
+    voice_samples_dir: str = "voice_samples"
+
+    # PyTorch 裝置與精度（GTX 1650 建議 cuda + float16）
+    torch_device: str = "cuda"
+    torch_dtype: str = "float16"
+
     class Config:
         env_file = str(_ENV_FILE)
         env_file_encoding = "utf-8"

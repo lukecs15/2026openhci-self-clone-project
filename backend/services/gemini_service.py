@@ -145,7 +145,11 @@ class GeminiService:
             reply_text = response.text
 
         except Exception as exc:
-            logger.error("Gemini API 呼叫失敗：%s", exc, exc_info=True)
+            exc_str = str(exc)
+            if "429" in exc_str or "RESOURCE_EXHAUSTED" in exc_str or "quota" in exc_str.lower():
+                logger.warning("Gemini API 429 頻率限制（model=%s）。請確認 .env GEMINI_MODEL=gemini-2.0-flash。", self.model_name)
+            else:
+                logger.error("Gemini API 呼叫失敗：%s", exc, exc_info=True)
             raise RuntimeError(f"LLM 服務暫時無法使用：{exc}") from exc
 
         # 更新 in-memory 歷史
@@ -179,3 +183,70 @@ class GeminiService:
             對話歷史列表。
         """
         return list(_session_history.get(session_id, []))
+
+    async def chat_with_system_prompt(
+        self,
+        user_message: str,
+        session_id: str,
+        system_prompt: str,
+        extra_context: Optional[str] = None,
+    ) -> tuple[str, list[ChatMessage]]:
+        """
+        使用自訂 system prompt 進行對話（語音場景用）。
+
+        與 chat() 的差異：
+        - system_prompt 完全由呼叫者提供（不再從 personality 建構）
+        - 支援 extra_context（注入近期對話摘要）
+        - 回應長度限制在 2-4 句話（語音播放優化）
+
+        Args:
+            user_message: 使用者輸入文字。
+            session_id: 對話 session ID（每個物件各自獨立）。
+            system_prompt: 完整的 system prompt（由 ConversationOrchestrator 提供）。
+            extra_context: 額外的上下文字串（可選，注入到 user_message 前）。
+
+        Returns:
+            tuple[str, list[ChatMessage]]: (回應文字, 完整歷史)
+
+        TODO: 加入 streaming 支援（讓前端逐字顯示更自然）
+        """
+        # 若有額外上下文，前置注入
+        full_message = user_message
+        if extra_context:
+            full_message = f"{extra_context}\n\n用戶最新說的話：{user_message}"
+
+        history = _session_history.setdefault(session_id, [])
+        gemini_history = [
+            {"role": msg.role, "parts": [msg.content]}
+            for msg in history
+        ]
+
+        try:
+            model = genai.GenerativeModel(
+                model_name=self.model_name,
+                system_instruction=system_prompt,
+                safety_settings=self.safety_settings,
+            )
+            chat_session = model.start_chat(history=gemini_history)
+            response = await chat_session.send_message_async(full_message)
+            reply_text = response.text
+
+        except Exception as exc:
+            exc_str = str(exc)
+            if "429" in exc_str or "RESOURCE_EXHAUSTED" in exc_str or "quota" in exc_str.lower():
+                # 頻率限制：不印 traceback，只記錄簡短警告
+                # 根本解法：換用 gemini-2.0-flash（1500 RPD 免費層）
+                logger.warning("Gemini API 429 頻率限制（model=%s）。請檢查 .env GEMINI_MODEL 設定。", self.model_name)
+            else:
+                logger.error("Gemini API 呼叫失敗（voice session）：%s", exc, exc_info=True)
+            raise RuntimeError(f"LLM 服務暫時無法使用：{exc}") from exc
+
+        # 歷史只記錄真實 user_message（不含 context）
+        history.append(ChatMessage(role="user", content=user_message))
+        history.append(ChatMessage(role="model", content=reply_text))
+
+        # 保留最近 20 輪
+        if len(history) > 40:
+            _session_history[session_id] = history[-40:]
+
+        return reply_text, list(history)

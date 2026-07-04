@@ -1,0 +1,47 @@
+# ── 語音系統依賴 ──────────────────────────────────────────────────────────────
+# 安裝方式：pip install -r requirements_voice.txt
+#
+# GTX 1650 (4GB VRAM) 注意事項：
+#   - faster-whisper medium 模型約佔 1.5GB VRAM
+#   - XTTS v2 合成時約佔 2.0GB VRAM
+#   - 程式會分時使用 STT / TTS，避免同時載入
+#   - 若出現 CUDA OOM，在 .env 設定 TORCH_DTYPE=float32 改用 CPU 推理
+#
+# ⚠ 已知套件衝突（重要）：
+#   F5-TTS 安裝後會將 transformers 強制升級至 5.x，
+#   破壞 TripoSR 的 transformers==4.35.0 環境，導致 3D 生成失效。
+#   已改用 Coqui XTTS v2（TTS>=0.22.0），其 transformers>=4.33.0 與 TripoSR 相容。
+#
+#   若已安裝 f5-tts，請先解除安裝並還原 transformers：
+#     pip uninstall f5-tts torchcodec -y
+#     pip install transformers==4.35.0
+#     pip install -r requirements_voice.txt
+
+# STT：本地語音辨識（繁體中文優先）
+faster-whisper>=1.0.0
+
+# TTS：Coqui XTTS v2 聲音克隆（取代 F5-TTS）
+# 首次執行會自動下載模型（~2GB），請確保磁碟空間充足
+# transformers>=4.33.0 → 與 TripoSR 的 transformers==4.35.0 相容
+TTS>=0.22.0
+
+# 音訊處理
+pydub>=0.25.1
+soundfile>=0.12.1
+librosa>=0.10.0
+
+# 數值運算
+numpy>=1.24.0
+
+# WebSocket 支援（FastAPI 已內建，此處確認版本）
+websockets>=12.0
+
+# 檔案上傳
+python-multipart>=0.0.9
+
+# ElevenLabs 雲端 TTS 備用（可選，設定 ELEVENLABS_API_KEY 後啟用）
+elevenlabs>=1.0.0
+
+# PyTorch 已在現有 requirements.txt 中，此處不重複列出
+# 若尚未安裝，請先執行：
+# pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121

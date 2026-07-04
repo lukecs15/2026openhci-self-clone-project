@@ -266,6 +266,133 @@ Frontend 啟動後，開啟 http://localhost:5173 即可使用。
 
 ---
 
+---
+
+## 語音系統設定（v0.2 新增）
+
+### 安裝語音依賴
+
+```bash
+cd backend
+pip install -r requirements_voice.txt
+```
+
+**首次執行注意：**
+- **faster-whisper** 會在第一次呼叫 STT 時自動下載模型（medium 約 1.5GB）
+- **XTTS v2** 會在第一次合成時自動下載模型（約 2GB），請確保磁碟空間充足
+- 下載位置：`~/.cache/tts/`（Coqui TTS 自動管理）
+
+### GTX 1650（4GB VRAM）最佳化建議
+
+| 模型 | VRAM 用量 | 說明 |
+|------|-----------|------|
+| faster-whisper medium | ~1.5GB | STT，float16 |
+| Coqui XTTS v2 | ~2.0GB | TTS，float16 |
+| **合計** | **最大 2.0GB**（分時使用） | 程式會在合成前釋放 STT 快取 |
+
+### ⚠ 已知套件衝突
+
+**F5-TTS 與 TripoSR 的 `transformers` 版本衝突。**
+
+F5-TTS 安裝時會將 `transformers` 強制升級至 5.x，導致 TripoSR 的 `ViTModel` import 失敗，3D 生成功能完全停止運作。
+
+因此 v0.2 改用 **Coqui XTTS v2**（`TTS>=0.22.0`），其依賴為 `transformers>=4.33.0`，與 TripoSR 的 `transformers==4.35.0` 完全相容。
+
+**若你之前已安裝過 F5-TTS，請先還原環境：**
+
+```bash
+pip uninstall f5-tts torchcodec -y
+pip install transformers==4.35.0
+pip install -r requirements_voice.txt
+```
+
+**VRAM 管理策略：**
+- STT 與 TTS 採**分時載入**，不同時在 GPU 上
+- 每次模型切換前呼叫 `torch.cuda.empty_cache()`
+- 若出現 CUDA OOM，在 `.env` 設定 `TORCH_DTYPE=float32` 改用 CPU（速度較慢）
+
+---
+
+## 聲音克隆流程
+
+### 1. 錄製樣本
+
+前往 `/voice-setup` 頁面，或手動準備 WAV 音訊：
+- **格式**：WAV, 16kHz, mono, 16bit
+- **時長**：至少 6 秒，建議 15-30 秒（XTTS v2 最低需求 6 秒，越長克隆品質越好）
+- **環境**：安靜室內，關閉風扇/冷氣，無背景音樂
+- **語言**：繁體中文（STT 以繁中為優先）
+
+**建議朗讀句子（複製使用）：**
+
+> 今天天氣很好，我想起了那段平靜的時光。每一件物品都是記憶的載體，輕聲訴說著那些被遺忘的故事。我把這些記憶珍藏在心裡，等待著某天再次相遇。那把舊椅子、那個破舊的茶杯，它們都見證了我成長的歲月。
+
+### 2. 建立聲音 Profile
+
+透過 `/voice-setup` 頁面 UI 操作，或直接呼叫 API：
+
+```bash
+# Step 1: 上傳樣本
+curl -X POST http://localhost:8000/api/voice/upload-sample \
+  -F "file=@my_voice.wav" \
+  -F "object_id=obj-001"
+
+# Step 2: 建立 profile（含調整參數）
+curl -X POST http://localhost:8000/api/voice/clone \
+  -H "Content-Type: application/json" \
+  -d '{
+    "object_id": "obj-001",
+    "object_name": "外婆的茶杯",
+    "pitch_shift": 1.5,
+    "speed": 0.95,
+    "energy": 0.9,
+    "sample_filename": "tmp_obj-001_abc12345.wav"
+  }'
+```
+
+### 3. 聲音差異化建議
+
+讓多個物件聲音有所區別的參數參考：
+
+| 物件 | pitch_shift | speed | energy | 效果 |
+|------|-------------|-------|--------|------|
+| 物件 1 | 0.0 | 1.0 | 1.0 | 原聲（基準） |
+| 物件 2 | +1.5 | 0.95 | 0.9 | 稍高音、輕柔 |
+| 物件 3 | -1.5 | 1.05 | 1.1 | 稍低音、有力 |
+| 物件 4 | +2.5 | 0.9 | 0.85 | 高音、輕柔慢速 |
+
+---
+
+## 場景操作說明
+
+### 進入語音場景
+
+1. 完成繪圖、3D 模型生成、人格問卷
+2. 點選「聲音設定」上傳錄音樣本（可跳過，但無語音輸出）
+3. 點選「✦ 語音場景」進入對話
+
+### 對話流程
+
+1. **自我介紹（Phase 1）**：物件依序出現並自我介紹，各提出一個引發反思的問題
+2. **對話（Phase 2）**：固定輪流，使用者說話 → 所有物件依序回應
+3. **結束**：10 次來回後，底部出現「結束對話」按鈕
+
+### 語音輸入
+
+| 模式 | 操作 | 說明 |
+|------|------|------|
+| 按住說話（Push-to-talk） | 按住麥克風按鈕 → 放開傳送 | 預設模式 |
+| 點按切換（Toggle） | 點一次開始 → 再點一次停止 | 點選「按住/點按」切換 |
+| 文字輸入 | 點選 ✏ 展開輸入欄 | 無法使用麥克風時的備用 |
+
+### 場景切換
+
+- 右上角按鈕切換「空間感」↔「抽象浮空」模式
+- 空間感：有地板、霧氣、方向性燈光
+- 抽象浮空：純黑底、星空粒子、無地板
+
+---
+
 ## 未來擴展
 
 ### 接入 TripoSR 本地端

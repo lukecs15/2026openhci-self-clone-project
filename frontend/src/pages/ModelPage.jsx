@@ -19,6 +19,35 @@ export default function ModelPage() {
   const modelProgress = useAppStore((s) => s.modelProgress)
   const thumbnailUrl = useAppStore((s) => s.thumbnailUrl)
   const personality = useAppStore((s) => s.personality)
+  const addVoiceObject = useAppStore((s) => s.addVoiceObject)
+  const setVoiceObjects = useAppStore((s) => s.setVoiceObjects)
+  const voiceObjects = useAppStore((s) => s.voiceSession.objects)
+
+  const handleAddToScene = () => {
+    if (!modelUrl || !personality) return
+    const obj = {
+      object_id: `obj-${Date.now()}`,
+      object_name: personality.object_description?.slice(0, 20) || '記憶之物',
+      object_description: personality.object_description || '',
+      model_url: modelUrl,
+      personality: personality,
+    }
+    addVoiceObject(obj)
+  }
+
+  const handleReplaceScene = () => {
+    if (!modelUrl || !personality) return
+    const obj = {
+      object_id: `obj-${Date.now()}`,
+      object_name: personality.object_description?.slice(0, 20) || '記憶之物',
+      object_description: personality.object_description || '',
+      model_url: modelUrl,
+      personality: personality,
+    }
+    setVoiceObjects([obj])
+  }
+
+  const isAlreadyInScene = voiceObjects.some(o => o.model_url === modelUrl)
 
   if (modelStatus === 'idle') {
     return (
@@ -85,45 +114,94 @@ export default function ModelPage() {
       {modelStatus === 'succeeded' && (
         <div style={{
           display: 'flex',
-          gap: '1rem',
-          alignItems: 'center',
+          flexDirection: 'column',
+          gap: '0.75rem',
           padding: '1rem',
           background: '#1e293b',
           borderRadius: '8px',
           border: '1px solid #334155',
         }}>
-          {thumbnailUrl && (
-            <img
-              src={thumbnailUrl}
-              alt="模型縮圖"
-              style={{ width: 48, height: 48, borderRadius: '8px', objectFit: 'cover' }}
-            />
-          )}
-          <div style={{ flex: 1 }}>
-            <p style={{ color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600 }}>
-              3D 模型已就緒
-            </p>
-            <p style={{ color: '#64748b', fontSize: '0.75rem' }}>
-              {personality ? '人格問卷已完成，可以開始對話了。' : '完成右側問卷後即可開始對話。'}
-            </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            {thumbnailUrl && (
+              <img
+                src={thumbnailUrl}
+                alt="模型縮圖"
+                style={{ width: 48, height: 48, borderRadius: '8px', objectFit: 'cover' }}
+              />
+            )}
+            <div style={{ flex: 1 }}>
+              <p style={{ color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600 }}>
+                3D 模型已就緒
+              </p>
+              <p style={{ color: '#64748b', fontSize: '0.75rem' }}>
+                {!personality
+                  ? '完成右側問卷後即可加入語音場景。'
+                  : isAlreadyInScene
+                    ? `✓ 已加入場景（場景共 ${voiceObjects.length} 個物件）`
+                    : `場景目前有 ${voiceObjects.length} 個物件，可將此物件加入。`
+                }
+              </p>
+            </div>
           </div>
-          <button
-            onClick={() => navigate('/chat')}
-            disabled={!personality}
-            style={{
-              padding: '0.75rem 1.5rem',
-              background: personality ? 'linear-gradient(135deg, #6366f1, #8b5cf6)' : '#334155',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '8px',
-              fontWeight: 700,
-              cursor: personality ? 'pointer' : 'not-allowed',
-              fontSize: '0.9rem',
-              transition: 'opacity 0.2s',
-            }}
-          >
-            ✦ 開始對話 →
-          </button>
+
+          {/* 按鈕列 */}
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+            {/* 文字對話（舊流程） */}
+            <button
+              onClick={() => navigate('/chat')}
+              disabled={!personality}
+              style={{
+                padding: '0.6rem 1.2rem',
+                background: 'transparent',
+                color: personality ? '#94a3b8' : '#334155',
+                border: `1px solid ${personality ? '#334155' : '#1e293b'}`,
+                borderRadius: '8px',
+                fontWeight: 500,
+                cursor: personality ? 'pointer' : 'not-allowed',
+                fontSize: '0.85rem',
+              }}
+            >
+              文字對話
+            </button>
+
+            {/* 加入語音場景 */}
+            <button
+              onClick={handleAddToScene}
+              disabled={!personality || isAlreadyInScene}
+              style={{
+                padding: '0.6rem 1.2rem',
+                background: isAlreadyInScene ? 'rgba(34,197,94,0.15)' : 'rgba(99,102,241,0.2)',
+                color: isAlreadyInScene ? '#4ade80' : (personality ? '#a5b4fc' : '#334155'),
+                border: `1px solid ${isAlreadyInScene ? 'rgba(34,197,94,0.4)' : 'rgba(99,102,241,0.4)'}`,
+                borderRadius: '8px',
+                fontWeight: 500,
+                cursor: (personality && !isAlreadyInScene) ? 'pointer' : 'not-allowed',
+                fontSize: '0.85rem',
+              }}
+            >
+              {isAlreadyInScene ? '✓ 已加入場景' : '+ 加入語音場景'}
+            </button>
+
+            {/* 進入語音場景 */}
+            <button
+              onClick={() => navigate('/scene')}
+              disabled={!personality || voiceObjects.length === 0}
+              style={{
+                padding: '0.6rem 1.5rem',
+                background: (personality && voiceObjects.length > 0)
+                  ? 'linear-gradient(135deg, #6366f1, #8b5cf6)'
+                  : '#334155',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '8px',
+                fontWeight: 700,
+                cursor: (personality && voiceObjects.length > 0) ? 'pointer' : 'not-allowed',
+                fontSize: '0.9rem',
+              }}
+            >
+              ✦ 進入語音場景 ({voiceObjects.length}) →
+            </button>
+          </div>
         </div>
       )}
     </div>
