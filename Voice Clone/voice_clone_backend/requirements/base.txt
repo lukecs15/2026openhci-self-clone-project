@@ -1,0 +1,32 @@
+# ── Voice Clone 多 Agent 對話系統 — 共用依賴（兩環境皆需要）──────────────────
+# 安裝順序見 requirements/dev-gtx1660ti.txt 或 requirements/prod-rtx5090.txt
+
+# Web framework
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+websockets>=12.0
+python-multipart>=0.0.9
+
+# HTTP client
+httpx>=0.27.0
+
+# 資料驗證 / 設定
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+python-dotenv>=1.0.0
+
+# LLM 雲端 API
+openai>=1.30.0
+google-generativeai>=0.8.0
+
+# 音訊處理
+# 注意：pydub 需要系統安裝 ffmpeg（用來解碼瀏覽器 MediaRecorder 輸出的
+# webm/opus，soundfile 本身不支援這個容器格式）。
+#   Windows: choco install ffmpeg  /  Mac: brew install ffmpeg  /  Linux: apt install ffmpeg
+numpy>=1.26.0,<2.0.0
+soundfile>=0.12.1
+pydub>=0.25.1
+
+# 測試
+pytest>=8.0.0
+pytest-asyncio>=0.23.0

@@ -1,0 +1,56 @@
+# =============================================
+# Voice Clone — 正式環境（RTX 5090, Blackwell, 32GB GDDR7）
+# =============================================
+#
+# 架構：
+#   Architecture : Blackwell (GB202), sm_100
+#   VRAM         : 32 GB GDDR7 / 512-bit / ~1.79TB/s 頻寬
+#   CUDA         : 建議 12.6+ (12.8 對 Blackwell 支援更完整)
+#
+# 本環境同時常駐：
+#   - Breeze ASR 25/26（主 STT，台灣腔/中英夾雜優化）
+#   - faster-whisper large-v3（備援 STT）
+#   - CosyVoice 2（TTS，本地 FastAPI/WebSocket 常駐服務，避免每次呼叫重新載入權重）
+#   VRAM 充足，STT 與 TTS 可同時載入，不需像開發機那樣分時卸載。
+#
+# 安裝順序：
+#   1) pip install torch>=2.7.0 torchvision torchaudio \
+#        --index-url https://download.pytorch.org/whl/cu128
+#   2) pip install -r requirements/base.txt
+#   3) pip install -r requirements/prod-rtx5090.txt
+#   4) 依 CosyVoice 2 官方 repo 指示安裝（含 Matcha-TTS 依賴），
+#      並將權重放到 COSYVOICE_MODEL_PATH 指定路徑
+#      https://github.com/FunAudioLLM/CosyVoice
+#
+# .env 建議設定：
+#   DEVICE_PROFILE=prod
+#   TORCH_DEVICE=cuda
+#   TORCH_DTYPE=bfloat16     # Blackwell 對 bfloat16 有原生加速
+#   STT_PRIMARY_ENGINE=breeze
+#   STT_FALLBACK_ENGINE=faster_whisper
+#   WHISPER_MODEL=large-v3
+#   BREEZE_ASR_ENABLED=true
+#   TTS_ENGINE=cosyvoice2
+# =============================================
+
+-r base.txt
+
+# STT 主引擎：Breeze ASR（MediaTek Research）
+funasr>=1.1.0
+modelscope>=1.15.0
+
+# STT 備援：faster-whisper（large-v3 在 5090 上遠超即時速度）
+faster-whisper>=1.0.0
+
+# TTS：CosyVoice 2 相關依賴（實際權重與 repo 需另行取得，見上方安裝順序）
+# CosyVoice 2 官方需求：見 https://github.com/FunAudioLLM/CosyVoice/requirements.txt
+onnxruntime-gpu>=1.20.0
+hydra-core>=1.3.2
+conformer>=0.3.2
+diffusers>=0.27.0
+gdown>=5.1.0
+
+# 多 Agent 編排（Pipecat 原生多 Agent worker/bus 模型）
+pipecat-ai>=0.0.50
+# 若需跨 process/機器協調的進階多 Agent 擴充：
+# pipecat-ai-subagents

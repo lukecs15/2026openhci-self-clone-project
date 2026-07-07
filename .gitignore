@@ -146,3 +146,11 @@ Thumbs.db
 
 # Accidental root-level npm artifact
 /package-lock.json
+
+# Voice Clone 模組（多 Agent 語音對話系統）
+/Voice Clone/voice_clone_frontend/node_modules/
+/Voice Clone/voice_clone_frontend/dist/
+/Voice Clone/voice_clone_frontend/.vite/
+/Voice Clone/voice_clone_backend/venv/
+/Voice Clone/voice_clone_backend/.pytest_cache/
+/Voice Clone/voice_clone_backend/voice_profiles/

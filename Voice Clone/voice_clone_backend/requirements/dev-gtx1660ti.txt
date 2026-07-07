@@ -1,0 +1,35 @@
+# =============================================
+# Voice Clone — 開發環境（GTX 1660 Ti, 6GB GDDR6）
+# =============================================
+#
+# 設計原則：
+#   1660Ti VRAM 有限，本模組在 dev profile 下：
+#     - STT：只用 faster-whisper（small/medium），不載入 Breeze ASR
+#     - TTS：用 MockTTSService（純文字→假音訊 bytes，驗證管線/協定，不吃 VRAM）
+#     - LLM：走雲端 API，不佔用本地 GPU
+#   目標是讓「多 Agent 編排邏輯 + WebSocket 協定 + 斷句/handoff/job-group」
+#   可以在這台開發機上完整測試，之後搬到 RTX 5090 只需切換 DEVICE_PROFILE=prod。
+#
+# 安裝順序：
+#   1) pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu121
+#      （1660Ti 為 Turing 架構，CUDA 11.x/12.1 皆可，若無 GPU 改裝 CPU 版）
+#   2) pip install -r requirements/base.txt
+#   3) pip install -r requirements/dev-gtx1660ti.txt
+#
+# .env 建議設定：
+#   DEVICE_PROFILE=dev
+#   TORCH_DEVICE=cuda        # 無 GPU 則 cpu
+#   TORCH_DTYPE=float16
+#   STT_PRIMARY_ENGINE=faster_whisper
+#   WHISPER_MODEL=small      # 6GB VRAM 建議 small 或 medium，避免與其他服務搶 VRAM
+#   TTS_ENGINE=mock
+# =============================================
+
+-r base.txt
+
+# STT：faster-whisper（1660Ti 上開 small/medium 綽綽有餘）
+faster-whisper>=1.0.0
+
+# 若要在 1660Ti 上「驗證」Breeze ASR 整合（非日常使用，僅流程測試）：
+# 可安裝 funasr（Breeze ASR 依賴之一），但建議用最小模型或直接用 mock
+# funasr>=1.1.0
