@@ -1,24 +1,34 @@
 # =============================================
-# Drawing to 3D v0.2 -- Backend
+# Drawing to 3D v0.2 -- RTX 5090 (Blackwell) Environment
 # =============================================
 #
-# This file lists only DIRECT dependencies.
-# Transitive dependencies are installed automatically by pip.
+# RTX 5090 specs:
+#   Architecture : Blackwell (GB202), sm_100
+#   VRAM         : 32 GB GDDR7
+#   CUDA         : requires CUDA 12.6+ (recommend 12.8)
 #
 # Installation order:
-#   Step 1: Install PyTorch (match your CUDA version)
-#     GTX 1650 + CUDA 12.1:
-#       pip install torch==2.5.1+cu121 torchvision==0.20.1+cu121 torchaudio==2.5.1+cu121 \
-#         --index-url https://download.pytorch.org/whl/cu121
+#   Step 1: Install PyTorch for Blackwell
+#     Option A -- CUDA 12.6 (stable):
+#       pip install torch>=2.6.0 torchvision torchaudio \
+#         --index-url https://download.pytorch.org/whl/cu126
 #
-#   Step 2: pip install -r requirements.txt
+#     Option B -- CUDA 12.8 (newer, better Blackwell support):
+#       pip install torch>=2.7.0 torchvision torchaudio \
+#         --index-url https://download.pytorch.org/whl/cu128
+#
+#   Step 2: pip install -r requirements_rtx5090.txt
 #   Step 3: pip install -r requirements_voice.txt
 #   Step 4: pip install -r services/TripoSR/requirements.txt
+#           (torchmcubes will recompile against new CUDA automatically)
 #
 # WARNING: transformers version is pinned to 4.35.0
 #   TripoSR requires exactly 4.35.0. Do NOT upgrade.
-#   Coqui TTS (XTTS v2) requires >=4.33.0 -- compatible.
-#   F5-TTS forces upgrade to 5.x -- do NOT install.
+#
+# .env changes recommended for RTX 5090:
+#   TORCH_DEVICE=cuda
+#   TORCH_DTYPE=bfloat16   # bfloat16 is faster than float16 on Blackwell
+#   WHISPER_MODEL=large-v3 # 32 GB VRAM allows large-v3 (was medium on GTX 1650)
 # =============================================
 
 # -- Web framework
@@ -27,7 +37,7 @@ uvicorn[standard]>=0.27.0
 websockets>=12.0
 python-multipart>=0.0.9
 
-# -- HTTP client (Meshy.ai API)
+# -- HTTP client
 httpx>=0.27.0
 
 # -- Data validation / settings
@@ -42,21 +52,23 @@ google-generativeai>=0.8.0
 Pillow>=10.0.0
 numpy>=1.26.0,<2.0.0
 
-# -- Audio processing (voice_service.py)
+# -- Audio processing
 soundfile>=0.12.1
 scipy>=1.11.0
 
 # -- ML / AI base (shared by TripoSR + XTTS v2)
 transformers==4.35.0
-huggingface-hub>=0.17.0
-accelerate>=0.26.0
+huggingface-hub>=0.21.0
+accelerate>=0.34.0
 safetensors>=0.4.0
 tokenizers>=0.14.0
 tqdm>=4.65.0
 
 # -- TripoSR 3D reconstruction
 trimesh>=4.0.0
+# rembg: use GPU-accelerated onnxruntime on RTX 5090
 rembg>=2.0.0
+onnxruntime-gpu>=1.20.0     # replaces CPU-only onnxruntime; rembg picks it up automatically
 imageio[ffmpeg]>=2.31.0
 moderngl>=5.10.0
 xatlas==0.0.9
