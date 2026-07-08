@@ -66,7 +66,7 @@ export default function DebateStage({
         <strong style={{ fontSize: '0.95rem' }}>{topicTitle}</strong>
       </div>
 
-      <AgentStage agents={agents} activeSpeakerIds={activeSpeakerIds} pendingAgentIds={[]} />
+      <AgentStage agents={agents} activeSpeakerIds={activeSpeakerIds} pendingAgentIds={[]} transcript={transcript} />
 
       <DevToggleLabel
         checked={browserTtsEnabled}

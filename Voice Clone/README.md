@@ -221,7 +221,7 @@ npm install
 npm test
 ```
 
-60 個測試，涵蓋範圍：`agentSessionReducer` / `debateSessionReducer` 狀態機
+105 個測試，涵蓋範圍：`agentSessionReducer` / `debateSessionReducer` 狀態機
 （WebSocket 事件如何驅動 UI 狀態，含多 agent 同時發話情境、暫停/插話狀態轉換、
 「chunk 文字為空不重複記錄 transcript」的迴歸測試）、`applyVoiceProfileToAgents`
 / `clearVoiceProfileFromAgents`（套用到單一 agent、套用到全部 agent、不可變性、
@@ -230,7 +230,13 @@ npm test
 WebSocket 訊息組裝函式（含 `routing_strategy` 未指定時不應該出現在訊息裡的
 迴歸測試、`buildTurnPlayedMessage()` 組出含 agent_id 的 turn_played 訊息）、
 瀏覽器端 TTS/STT 測試替代方案（`browserTts` / `browserStt`）、
-`agentSpeakingSync`（發話高亮對齊實際播放結束時間）。
+`agentSpeakingSync`（發話高亮對齊實際播放結束時間）、`waveformSignature`
+（決定性、範圍邊界、`waveform_signature` 覆寫欄位優先、`applyEmotionSignal`
+情緒疊加與 clamp、絕對不改動 waveHeight、`lerpSignatureTowards` 逐欄位線性
+插值）、`waveformPath`（`buildWavePath` 決定性、speakIntensity/waveHeight
+影響振幅、取樣點 clamp 在畫布範圍內、`verticalOffset`/`ampScale` 多層波場
+參數、`lerpTowards` 線性插值行為）、`emotionSignal`（`analyzeTurnEmotion`
+決定性、空字串安全、標點/關鍵字次數封頂、多特徵疊加，見第九節）。
 
 > 注意：前端測試只驗證狀態機/邏輯本身，不啟動真正的 WebSocket 連線、麥克風或
 > 後端 API，因此在任何機器（包含沒有 GPU 的開發機）都能執行。
@@ -496,7 +502,125 @@ test_ws_debate.py` 新增兩個測試，一個故意不送 ack、驗證最後一
 先等滿 `ack_timeout` 才送出 `debate_finished`；另一個模擬 ack 很快送達、
 驗證正常情況不會被白白拖慢。
 
-## 九、尚待整合（對照原架構文件「尚待討論」章節）
+## 九、Agent 頭像動態波形視覺化
+
+需求：agent 頭像改用動態波形呈現，初始波形要能反映 agent 的背景設定，
+對話過程中以這個波形為主軸、略為動態調整呈現變化，整體要有沉浸感；波形
+的視覺元素對照下表的心理意義設計：
+
+| 波紋元素 | 可代表的心理／敘事意義 |
+|---|---|
+| 頻率 | 思緒速度、焦慮程度、反覆出現的念頭 |
+| 振幅 | 情緒強度 |
+| 波高 | 該角色在當下的主導程度 |
+| 波形 | 說話方式、人格風格、反應模式 |
+| 顏色 | 生命階段、情緒類型或記憶溫度 |
+
+### 9.1 波形人格簽章（`utils/waveformSignature.js`）
+
+「從 persona_prompt 文字語意分析出這五個參數」這件事，使用者確認之後會
+改成用問卷讓使用者自己設定（不分析自由文字），所以目前**刻意先不做文字
+語意分析**，只提供一組決定性的預設值：`getWaveformSignature(agent)` 用
+`agent_id` 雜湊挑選一個預先設計好的「波形人格」原型（`WAVEFORM_PRESETS`，
+六種，例如「沉穩」「焦慮」「果斷主導」，每一種的五個參數都是照上表心理
+意義刻意調過的，不是隨機亂數），再加一點依 `agent_id` 決定的小幅 jitter，
+讓即使兩個 agent 選到同一個原型，視覺上也會有些微差異。純函式、同一個
+`agent_id` 永遠得到同一組結果，重整頁面或換分頁都不會讓頭像「跳掉」。
+
+**接線點（之後問卷流程）**：如果 agent 物件（`AgentConfig`）之後帶有
+`waveform_signature` 欄位（結構跟這裡回傳的物件一樣：`{ frequency,
+amplitude, waveHeight, waveformShape, hue }`，來源是使用者填問卷後算出來
+的真實數值），`getWaveformSignature()` 會直接優先採用該欄位、完全略過
+preset 挑選邏輯——`WaveformAvatar` / `AgentStage` 不需要跟著改，只要 agent
+物件多了這個欄位就會自動生效，不需要改呼叫端。
+
+### 9.2 波形動畫數學（`utils/waveformPath.js`）
+
+`buildWavePath({ signature, time, speakIntensity, width, height, phaseOffset, verticalOffset, ampScale })`
+是完全跟 React/DOM 無關的純函式，把「簽章 + 目前時間 + 說話強度」換算成
+一條 SVG path 的 `d` 字串，方便直接用 vitest 驗證波形數學本身，不需要真
+的 render 元件、跑 `requestAnimationFrame`：
+
+- **主軸**：任何時刻的波形都是 signature 五個參數決定的基準波形的變形，
+  不會因為說話與否整個換一種長相，符合「以這個波形為主軸，略為動態
+  調整」的需求。
+- **呼吸 envelope**：即使沒人說話，波形也會用一個緩慢週期的正弦波起伏
+  （0.85～1.0 倍，週期秒數見 9.6 節），讓頭像感覺「活著」而不是靜態圖案，
+  這是沉浸感設計的重要部分。
+- **speakIntensity（0～1）**：說話中振幅放大到最多 1.8 倍、相位前進速度
+  也加快，讓波形明顯更有活力；這個值不是布林值瞬間切換，而是由呼叫端
+  （`WaveformAvatar.jsx`）每一幀用線性插值（`lerpTowards()`）平滑地往
+  0 或 1 靠近，說話開始/結束時波形是平滑放大/收斂，不會瞬間跳一下。
+- **waveformShape 控制的是「主波形」跟「高頻諧波」的混合比例**：0 接近
+  單純正弦波（平滑、規律），1 疊加更多高頻諧波（起伏更複雜、更不規則），
+  對應「說話方式、人格風格」的差異。
+- 所有取樣點的 y 座標都會 clamp 在 `[0, height]` 內，避免極端訊號組合
+  （例如之後問卷流程給出的 amplitude/waveHeight 剛好都貼近上限、又同時
+  在說話）理論上讓波形超出 SVG 畫布範圍。
+
+### 9.3 動畫元件（`components/WaveformAvatar.jsx`）
+
+動畫用 `requestAnimationFrame` 迴圈 + 直接對 SVG `<path>` 的 DOM node
+呼叫 `setAttribute('d', ...)`，刻意不透過 React state 每一幀觸發
+re-render（頭像可能同時有好幾個、每秒要更新好幾十次，用 state 驅動會
+造成不必要的 reconciliation 開銷）；真正的波形數學都在 9.2 節的純函式裡，
+元件本身只負責「每一幀呼叫它、把結果寫進 DOM」。
+
+### 9.4 波紋鋪滿整個方框背景，不再限縮於圓形
+
+第一版把波形裁切在一個圓形範圍內、呈現成傳統的「頭像」；後續使用者
+回饋希望波紋呈現在整個 agent 方框的背景，而不是限縮在圓形裡。作法：
+SVG 用固定的邏輯座標系（`VIEW_WIDTH=240, VIEW_HEIGHT=140`）搭配
+`width="100%" height="100%"` + `preserveAspectRatio="none"`，讓它直接
+撐滿外層容器（`AgentStage.jsx` 裡的 agent 方框），不需要量測容器實際
+像素大小；裁切成圓角矩形跟外層容器一致，完全交給外層容器的
+`overflow: hidden` + `border-radius` 處理。`AgentStage.jsx` 因此也
+重新設計：方框改成 `position: relative` + `overflow: hidden`，
+`WaveformAvatar` 以絕對定位鋪滿整個方框當背景，名稱／角色標籤疊在
+上層、搭配底部深色漸層維持文字可讀性，方框邊框跟外發光在說話中會用該
+agent 的波形色相點亮，呼應波紋本身的顏色。
+
+視覺上不是畫一條線，而是疊 5 層波形（`BANDS` 常數）：每一層用不同的
+垂直位移、振幅倍率、相位偏移、透明度（`buildWavePath()` 新增的
+`verticalOffset` / `ampScale` 參數），中間幾層振幅最大、最不透明，邊緣
+層較弱較淡，疊出一片會流動的波紋場，搭配一層套用高斯模糊的發光層
+（沿用中間那層的資料，加粗加模糊）與底色漸層，取代第一版的
+glow/echo/primary 三層單線設計，營造更沉浸的氛圍背景。
+
+### 9.5 情緒驅動的波形變化（`utils/emotionSignal.js`）
+
+需求：對話過程中，波形要因為 agent 回覆的情緒而動態調整、試圖改變波的
+「形狀」，不是只有「說話中/沒說話」兩種狀態。新增 `analyzeTurnEmotion(text)`
+是輕量的文字特徵評分（標點符號 + 關鍵字計數，不呼叫 LLM），把單輪 agent
+說的話換算成「相對於基準波形的偏移量」：
+
+- 驚嘆號／疑問句／猶豫語氣（`...`、`…`、`呃`、`嗯`）影響頻率（思緒速度）
+  跟波形複雜度；溫暖關鍵字（謝謝、開心、溫暖…）跟緊張關鍵字（焦慮、
+  壓力、痛苦…）則影響波形複雜度跟色相偏移方向。
+- 每種特徵出現次數的影響力都封頂（`Math.min(count, 3)`），避免長文字
+  因為關鍵字/標點重複出現太多次而讓偏移量線性暴走。
+
+`waveformSignature.js` 新增 `applyEmotionSignal(baseSignature, emotion)`
+把這個偏移疊加在角色的基準簽章上（clamp 過），**刻意不改動 `waveHeight`**：
+波高代表「主導程度」，是角色一直以來的特質，不該因為單輪情緒起伏而改變，
+只有頻率/振幅/波形/顏色會隨情緒微調——這樣「以角色波形為主軸，情緒只是
+讓它有感地變化」的設計意圖才成立。另外新增 `lerpSignatureTowards()`
+逐欄位線性插值，讓 `WaveformAvatar.jsx` 在句子換了、情緒偏移跳動時，
+波形是漸變過去，不會瞬間變形（已知簡化：`hue` 沒有處理跨越 0/360 邊界
+走最短路徑的情況，實務上情緒造成的色相偏移量不大，不太會真的跨越邊界，
+先不處理）。`AgentStage.jsx` 從 `transcript` 算出每位 agent「最新一句話」
+的文字（`buildLatestTextByAgent()`），當作 `currentText` prop 傳給
+`WaveformAvatar`，驅動這整條情緒鏈路。
+
+### 9.6 流動速度加快
+
+呼應「波的流動速度整體可以再快一點點」的需求，`waveformPath.js` 的
+`BREATHE_PERIOD_SECONDS`（不說話時波形仍會緩慢起伏的呼吸週期）從 3.2
+秒調快到 2.6 秒，`phaseSpeed`（相位前進速度，決定波形「動得多快」）的
+基準值也從 `0.6 + speakIntensity * 0.9` 提高到 `0.9 + speakIntensity * 1.3`
+（約快 50%），待機跟說話中的流動感都更有生氣。
+
+## 十、尚待整合（對照原架構文件「尚待討論」章節）
 
 1. Breeze ASR 25/26 實際推理程式碼（`services/stt_service.py` 的 `BreezeASREngine`）
 2. CosyVoice 2 實際推理程式碼（`services/tts_service.py` 的 `CosyVoiceModelServer`）
@@ -521,3 +645,7 @@ test_ws_debate.py` 新增兩個測試，一個故意不送 ack、驗證最後一
 8. 辯論模式主題目前是後端寫死的三個選項（`agents/debate.py` 的
    `DEFAULT_DEBATE_TOPICS`），之後若要開放使用者自訂主題，需要新增對應的
    REST/WS 介面與前端輸入欄位。
+9. Agent 波形頭像目前只有「先幫忙 default」的六種預設波形人格原型（見
+   第九節），還沒接上真正的問卷流程——`getWaveformSignature()` 已經預留
+   `agent.waveform_signature` 覆寫欄位，之後只需要在問卷完成後把算好的
+   數值存進這個欄位即可，不需要改動畫元件或波形數學。

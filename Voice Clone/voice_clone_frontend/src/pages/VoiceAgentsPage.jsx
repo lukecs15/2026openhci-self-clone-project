@@ -287,6 +287,7 @@ export default function VoiceAgentsPage() {
               activeSpeakerIds={chat.state.activeSpeakerIds}
               pendingAgentIds={chat.state.pendingAgentIds}
               routingMode={chat.state.routingMode}
+              transcript={chat.state.transcript}
             />
             <DevToggleLabel
               checked={chat.browserTtsEnabled}
