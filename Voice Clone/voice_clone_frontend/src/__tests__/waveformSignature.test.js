@@ -15,6 +15,7 @@ const FIELD_BOUNDS = {
   amplitude: [0.1, 0.6],
   waveHeight: [0.4, 1.0],
   waveformShape: [0, 1],
+  colorIntensity: [0.2, 1],
 }
 
 function expectWithinBounds(signature) {
@@ -91,6 +92,7 @@ const BASE_SIGNATURE = {
   waveHeight: 0.8,
   waveformShape: 0.3,
   hue: 200,
+  colorIntensity: 0.55,
 }
 
 describe('applyEmotionSignal', () => {
@@ -140,6 +142,25 @@ describe('applyEmotionSignal', () => {
     expect(result.waveformShape).toBe(BASE_SIGNATURE.waveformShape)
     expect(result.hue).toBe(BASE_SIGNATURE.hue)
   })
+
+  it('把 intensityDelta 疊加到 colorIntensity 上（顏色也是情緒的變量）', () => {
+    const result = applyEmotionSignal(BASE_SIGNATURE, { intensityDelta: 0.2 })
+    expect(result.colorIntensity).toBeCloseTo(0.75, 5)
+  })
+
+  it('colorIntensity 疊加後一樣會 clamp 在 [0.2, 1] 範圍內', () => {
+    const veryIntense = applyEmotionSignal(BASE_SIGNATURE, { intensityDelta: 100 })
+    expect(veryIntense.colorIntensity).toBeLessThanOrEqual(1)
+
+    const veryFlat = applyEmotionSignal(BASE_SIGNATURE, { intensityDelta: -100 })
+    expect(veryFlat.colorIntensity).toBeGreaterThanOrEqual(0.2)
+  })
+
+  it('baseSignature 沒有 colorIntensity 欄位時（例如舊資料），用預設基準值當防呆', () => {
+    const legacySignature = { frequency: 1.0, amplitude: 0.3, waveHeight: 0.8, waveformShape: 0.3, hue: 200 }
+    const result = applyEmotionSignal(legacySignature, { intensityDelta: 0.1 })
+    expect(result.colorIntensity).toBeCloseTo(0.65, 5) // 0.55（預設基準）+ 0.1
+  })
 })
 
 describe('lerpSignatureTowards', () => {
@@ -150,6 +171,7 @@ describe('lerpSignatureTowards', () => {
     waveHeight: 1.0,
     waveformShape: 0.8,
     hue: 300,
+    colorIntensity: 1.0,
   }
 
   it('rate=0 時完全不移動（回傳值等於 current 的各欄位）', () => {
@@ -159,6 +181,7 @@ describe('lerpSignatureTowards', () => {
     expect(result.waveHeight).toBe(BASE_SIGNATURE.waveHeight)
     expect(result.waveformShape).toBe(BASE_SIGNATURE.waveformShape)
     expect(result.hue).toBe(BASE_SIGNATURE.hue)
+    expect(result.colorIntensity).toBe(BASE_SIGNATURE.colorIntensity)
   })
 
   it('rate=1 時直接跳到 target 的各欄位', () => {
@@ -168,6 +191,15 @@ describe('lerpSignatureTowards', () => {
     expect(result.waveHeight).toBe(target.waveHeight)
     expect(result.waveformShape).toBe(target.waveformShape)
     expect(result.hue).toBe(target.hue)
+    expect(result.colorIntensity).toBe(target.colorIntensity)
+  })
+
+  it('colorIntensity 缺欄位時（current 或 target 任一沒有），用預設基準值當防呆，不會變成 NaN', () => {
+    const currentWithoutColor = { ...BASE_SIGNATURE }
+    delete currentWithoutColor.colorIntensity
+    const result = lerpSignatureTowards(currentWithoutColor, target, 0.5)
+    expect(Number.isNaN(result.colorIntensity)).toBe(false)
+    expect(result.colorIntensity).toBeCloseTo((0.55 + 1.0) / 2, 5)
   })
 
   it('rate 介於 0~1 時每個欄位都各自往 target 移動一部分，不超過 target', () => {
@@ -176,6 +208,8 @@ describe('lerpSignatureTowards', () => {
     expect(result.frequency).toBeLessThan(target.frequency)
     expect(result.waveHeight).toBeGreaterThan(BASE_SIGNATURE.waveHeight)
     expect(result.waveHeight).toBeLessThan(target.waveHeight)
+    expect(result.colorIntensity).toBeGreaterThan(BASE_SIGNATURE.colorIntensity)
+    expect(result.colorIntensity).toBeLessThan(target.colorIntensity)
   })
 
   it('反覆呼叫會讓每個欄位持續逼近 target（跟 waveformPath.js 的 lerpTowards 同樣的收斂特性）', () => {

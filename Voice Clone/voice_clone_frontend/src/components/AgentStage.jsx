@@ -16,9 +16,21 @@
  * 「這位 agent 最新一句話說了什麼」，交給 WaveformAvatar 依情緒微調波形
  * 形狀（見 utils/emotionSignal.js）。沒有 transcript 資料的舊呼叫端仍然
  * 能正常運作，只是波形會維持在角色的基準狀態，不會有逐句的情緒變化。
+ *
+ * ── 波形簽章要跨 render 保持同一個物件參考 ──────────────────────────
+ * `getWaveformSignature(agent)` 雖然是純函式（同一個 agent_id 永遠得到
+ * 「值」相同的結果），但每次呼叫都會回傳一個新的物件字面量。這個元件（跟
+ * 它的父層 VoiceAgentsPage/DebateStage）在對話過程中會因為
+ * activeSpeakerIds/transcript 變化而頻繁重新 render，如果每次 render 都
+ * 重新呼叫 getWaveformSignature() 當作新的 `signature` prop 傳給
+ * WaveformAvatar，會讓 WaveformAvatar 內部「只有換 agent 才重置、句子
+ * 變化時平滑過渡」的 useEffect（依賴 `[signature]`，用物件參考比較）誤判
+ * 成「換了新 agent」而頻繁重置，形狀/顏色的平滑漸變效果就會被打斷。用
+ * signatureCacheRef 讓同一個 agent_id 在整個 AgentStage 生命週期內都拿到
+ * 同一個物件參考，從根本解決這個問題。
  */
 
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import { getWaveformSignature } from '../utils/waveformSignature'
 import WaveformAvatar from './WaveformAvatar'
 
@@ -41,6 +53,7 @@ export default function AgentStage({
   transcript = [],
 }) {
   const latestTextByAgent = useMemo(() => buildLatestTextByAgent(transcript), [transcript])
+  const signatureCacheRef = useRef({})
 
   return (
     <div
@@ -55,7 +68,13 @@ export default function AgentStage({
       {agents.map((agent) => {
         const isSpeaking = activeSpeakerIds.includes(agent.agent_id)
         const isPending = pendingAgentIds.includes(agent.agent_id) && !isSpeaking
-        const signature = getWaveformSignature(agent)
+        // 見檔案開頭「波形簽章要跨 render 保持同一個物件參考」說明：同一個
+        // agent_id 只算一次、快取起來，不是每次 render 都重新呼叫。
+        const agentKey = agent.agent_id || agent.display_name
+        if (!signatureCacheRef.current[agentKey]) {
+          signatureCacheRef.current[agentKey] = getWaveformSignature(agent)
+        }
+        const signature = signatureCacheRef.current[agentKey]
         const glowColor = `hsl(${signature.hue}, 85%, 60%)`
 
         return (

@@ -7,7 +7,7 @@ import { analyzeTurnEmotion } from '../utils/emotionSignal'
 
 describe('analyzeTurnEmotion', () => {
   it('空字串／undefined／null 都回傳全部為 0 的偏移量，不會拋例外', () => {
-    const zero = { frequencyDelta: 0, amplitudeDelta: 0, shapeDelta: 0, hueDelta: 0 }
+    const zero = { frequencyDelta: 0, amplitudeDelta: 0, shapeDelta: 0, hueDelta: 0, intensityDelta: 0 }
     expect(analyzeTurnEmotion('')).toEqual(zero)
     expect(analyzeTurnEmotion(undefined)).toEqual(zero)
     expect(analyzeTurnEmotion(null)).toEqual(zero)
@@ -20,7 +20,7 @@ describe('analyzeTurnEmotion', () => {
 
   it('平淡沒有任何標點/關鍵字的文字，所有偏移量都是 0', () => {
     const result = analyzeTurnEmotion('今天天氣普通')
-    expect(result).toEqual({ frequencyDelta: 0, amplitudeDelta: 0, shapeDelta: 0, hueDelta: 0 })
+    expect(result).toEqual({ frequencyDelta: 0, amplitudeDelta: 0, shapeDelta: 0, hueDelta: 0, intensityDelta: 0 })
   })
 
   it('驚嘆號越多，frequencyDelta 跟 amplitudeDelta 越大（興奮的語氣）', () => {
@@ -80,5 +80,32 @@ describe('analyzeTurnEmotion', () => {
     const combined = analyzeTurnEmotion('太好了！謝謝你')
     expect(combined.frequencyDelta).toBeCloseTo(excitedOnly.frequencyDelta, 5)
     expect(combined.hueDelta).toBeCloseTo(warmOnly.hueDelta, 5)
+  })
+
+  it('興奮/緊張語氣會提高 intensityDelta（顏色應該更飽和明亮）', () => {
+    const plain = analyzeTurnEmotion('我知道了')
+    const excited = analyzeTurnEmotion('太好了！！！')
+    const tense = analyzeTurnEmotion('我好焦慮，好緊張，壓力好大')
+    expect(excited.intensityDelta).toBeGreaterThan(plain.intensityDelta)
+    expect(tense.intensityDelta).toBeGreaterThan(plain.intensityDelta)
+  })
+
+  it('猶豫語氣會降低 intensityDelta（顏色應該更黯淡柔和）', () => {
+    const plain = analyzeTurnEmotion('我覺得可以這樣做')
+    const hesitant = analyzeTurnEmotion('呃…我覺得…可以這樣做吧')
+    expect(hesitant.intensityDelta).toBeLessThan(plain.intensityDelta)
+  })
+
+  it('溫暖語氣也會稍微提高 intensityDelta，但幅度比興奮/緊張小', () => {
+    const warm = analyzeTurnEmotion('謝謝你，真的很開心')
+    const excited = analyzeTurnEmotion('太好了！！！')
+    expect(warm.intensityDelta).toBeGreaterThan(0)
+    expect(warm.intensityDelta).toBeLessThan(excited.intensityDelta)
+  })
+
+  it('intensityDelta 的次數影響力也會封頂（不會線性暴走）', () => {
+    const three = analyzeTurnEmotion('好！！！')
+    const six = analyzeTurnEmotion('好！！！！！！')
+    expect(six.intensityDelta).toBe(three.intensityDelta)
   })
 })

@@ -16,6 +16,14 @@
  *
  * 每種特徵出現次數的影響力都用 Math.min(count, 3) 封頂，避免長文字因為
  * 關鍵字/標點重複出現太多次而讓偏移量線性暴走。
+ *
+ * ── 顏色也是情緒的變量：intensityDelta ────────────────────────────────
+ * 除了波形形狀，顏色的飽和度／明亮度也應該隨情緒變化：情緒越激動（興奮或
+ * 緊張）顏色應該越飽和明亮，猶豫時稍微黯淡柔和。`intensityDelta` 就是這個
+ * 「飽和度/明亮度」的偏移量，跟 hueDelta（色相偏移，代表情緒類型/暖冷）
+ * 是分開的兩個維度——hueDelta 決定「往哪個顏色偏」，intensityDelta 決定
+ * 「這個顏色有多鮮明/多亮」。實際套用見 waveformSignature.js 的
+ * `colorIntensity` 欄位與 utils/waveformColor.js。
  */
 
 const EXCITED_PATTERN = /[！!]/g
@@ -40,11 +48,11 @@ function countKeywords(text, keywords) {
 
 /**
  * @param {string} text 這一輪（或目前累積到的這一句）agent 說的話
- * @returns {{ frequencyDelta:number, amplitudeDelta:number, shapeDelta:number, hueDelta:number }}
+ * @returns {{ frequencyDelta:number, amplitudeDelta:number, shapeDelta:number, hueDelta:number, intensityDelta:number }}
  */
 export function analyzeTurnEmotion(text) {
   if (!text) {
-    return { frequencyDelta: 0, amplitudeDelta: 0, shapeDelta: 0, hueDelta: 0 }
+    return { frequencyDelta: 0, amplitudeDelta: 0, shapeDelta: 0, hueDelta: 0, intensityDelta: 0 }
   }
 
   const excited = countMatches(text, EXCITED_PATTERN)
@@ -62,9 +70,13 @@ export function analyzeTurnEmotion(text) {
   // 波形：疑問/緊張讓波形更複雜不規則，溫暖的語氣讓波形更平滑規律。
   const shapeDelta = questioning * 0.08 + tense * 0.1 - warm * 0.08
 
-  // 顏色：溫暖語氣往暖色調偏，緊張語氣往外偏移（不特別指定方向，只是
-  // 讓色相有感地變化，數值範圍刻意不大，避免整個變成完全不同的顏色）。
+  // 顏色（色相）：溫暖語氣往暖色調偏，緊張語氣往外偏移（不特別指定方向，
+  // 只是讓色相有感地變化，數值範圍刻意不大，避免整個變成完全不同的顏色）。
   const hueDelta = warm * 12 - tense * 15
 
-  return { frequencyDelta, amplitudeDelta, shapeDelta, hueDelta }
+  // 顏色（飽和度/明亮度）：情緒越激動（興奮或緊張）顏色越鮮明，猶豫時稍微
+  // 黯淡收斂，溫暖語氣也讓顏色稍微亮一點（但幅度比興奮/緊張小）。
+  const intensityDelta = excited * 0.12 + tense * 0.12 + warm * 0.05 - hesitant * 0.08
+
+  return { frequencyDelta, amplitudeDelta, shapeDelta, hueDelta, intensityDelta }
 }

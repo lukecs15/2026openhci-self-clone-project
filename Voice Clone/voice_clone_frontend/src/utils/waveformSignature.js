@@ -22,15 +22,21 @@
  * ── 接線點：之後問卷流程 ──────────────────────────────────────────────
  * 之後如果 agent 物件（AgentConfig）上帶有 `waveform_signature` 欄位
  * （結構跟這裡回傳的物件一樣：{ frequency, amplitude, waveHeight,
- * waveformShape, hue }，來源是使用者填問卷後算出來的真實數值），這個函式
- * 會直接優先採用該欄位、完全略過 preset 挑選邏輯——呼叫端（WaveformAvatar
- * / AgentStage）不需要跟著改，只要 agent 物件多了這個欄位就會自動生效。
+ * waveformShape, hue, colorIntensity }，來源是使用者填問卷後算出來的真實
+ * 數值），這個函式會直接優先採用該欄位、完全略過 preset 挑選邏輯——呼叫端
+ * （WaveformAvatar / AgentStage）不需要跟著改，只要 agent 物件多了這個
+ * 欄位就會自動生效。
  *
  * ── 情緒訊號 ────────────────────────────────────────────────────────
  * 這裡的簽章只代表「角色一直以來大致是什麼樣子」的基準波形；對話過程中
  * 每一輪話語的情緒起伏是另外一層（見 utils/emotionSignal.js 的
  * analyzeTurnEmotion()），用 applyEmotionSignal() 疊加在基準簽章上，
- * 兩者刻意分開設計，職責不同。
+ * 兩者刻意分開設計，職責不同。`colorIntensity`（顏色的飽和度/明亮度整體
+ * 強度）是額外的一個維度，跟 hue 分開：hue 決定「顏色偏向哪裡」（角色
+ * 一直以來的特質，見上表），colorIntensity 決定「這個顏色現在有多鮮明」
+ * （純粹是情緒驅動，見 emotionSignal.js 的 intensityDelta），所以這裡的
+ * 基準值（BASE_COLOR_INTENSITY）對所有角色都一樣，不像 hue 是 preset
+ * 挑出來的角色特質。
  */
 
 // 六個預先設計好的「波形人格」原型，每一項的五個參數都是刻意依照上方
@@ -92,7 +98,17 @@ const BOUNDS = {
   amplitude: [0.1, 0.6],
   waveHeight: [0.4, 1.0],
   waveformShape: [0, 1],
+  // 顏色的飽和度/明亮度整體強度（0～1，見 utils/waveformColor.js 怎麼把它
+  // 換算成實際的 hsl() 飽和度/明亮度）。下限刻意不是 0，避免情緒極端猶豫時
+  // 顏色整個變成死灰色、看起來像壞掉了。
+  colorIntensity: [0.2, 1],
 }
+
+/** colorIntensity 沒有指定「角色人格」的意義（見檔案開頭表格，顏色的角色
+ * 特質是 hue，不是飽和度/明亮度），所以每個 agent 的基準值都一樣，只靠
+ * jitter 做一點個體差異，實際的鮮明/黯淡變化交給情緒訊號驅動。
+ */
+const BASE_COLOR_INTENSITY = 0.55
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value))
@@ -123,7 +139,7 @@ function jitterFactor(seed) {
  * 永遠回傳同一組數值。
  *
  * @param {{ agent_id?: string, display_name?: string, waveform_signature?: object }} agent
- * @returns {{ presetName: string, frequency: number, amplitude: number, waveHeight: number, waveformShape: number, hue: number }}
+ * @returns {{ presetName: string, frequency: number, amplitude: number, waveHeight: number, waveformShape: number, hue: number, colorIntensity: number }}
  */
 export function getWaveformSignature(agent) {
   if (agent && agent.waveform_signature) {
@@ -141,6 +157,7 @@ export function getWaveformSignature(agent) {
   const heightJitter = jitterFactor(`${key}:waveHeight`) * 0.12
   const shapeJitter = jitterFactor(`${key}:waveformShape`) * 0.2
   const hueJitter = jitterFactor(`${key}:hue`) * 20 // ±20 度色相微調
+  const colorIntensityJitter = jitterFactor(`${key}:colorIntensity`) * 0.15
 
   return {
     presetName: preset.name,
@@ -149,6 +166,7 @@ export function getWaveformSignature(agent) {
     waveHeight: clamp(preset.waveHeight * (1 + heightJitter), ...BOUNDS.waveHeight),
     waveformShape: clamp(preset.waveformShape + shapeJitter, ...BOUNDS.waveformShape),
     hue: (Math.round(preset.hue + hueJitter) + 360) % 360,
+    colorIntensity: clamp(BASE_COLOR_INTENSITY + colorIntensityJitter, ...BOUNDS.colorIntensity),
   }
 }
 
@@ -159,8 +177,8 @@ export function getWaveformSignature(agent) {
  * 單輪情緒起伏而改變，只有頻率/振幅/波形/顏色會隨情緒微調——這樣「以角色
  * 波形為主軸，情緒只是讓它有感地變化」的設計意圖才成立。
  *
- * @param {{frequency:number, amplitude:number, waveHeight:number, waveformShape:number, hue:number}} baseSignature
- * @param {{frequencyDelta?:number, amplitudeDelta?:number, shapeDelta?:number, hueDelta?:number}} [emotion]
+ * @param {{frequency:number, amplitude:number, waveHeight:number, waveformShape:number, hue:number, colorIntensity?:number}} baseSignature
+ * @param {{frequencyDelta?:number, amplitudeDelta?:number, shapeDelta?:number, hueDelta?:number, intensityDelta?:number}} [emotion]
  */
 export function applyEmotionSignal(baseSignature, emotion) {
   if (!emotion) return baseSignature
@@ -170,6 +188,13 @@ export function applyEmotionSignal(baseSignature, emotion) {
     amplitude: clamp(baseSignature.amplitude + (emotion.amplitudeDelta || 0), ...BOUNDS.amplitude),
     waveformShape: clamp(baseSignature.waveformShape + (emotion.shapeDelta || 0), ...BOUNDS.waveformShape),
     hue: (Math.round(baseSignature.hue + (emotion.hueDelta || 0)) + 360) % 360,
+    // baseSignature 可能是還沒補上 colorIntensity 的舊資料（例如問卷流程
+    // 之後直接塞進來的 waveform_signature 覆寫欄位還沒補這個欄位），
+    // 用 BASE_COLOR_INTENSITY 當防呆預設值。
+    colorIntensity: clamp(
+      (baseSignature.colorIntensity ?? BASE_COLOR_INTENSITY) + (emotion.intensityDelta || 0),
+      ...BOUNDS.colorIntensity,
+    ),
   }
 }
 
@@ -198,6 +223,10 @@ export function lerpSignatureTowards(current, target, rate) {
     waveHeight: lerp(current.waveHeight, target.waveHeight),
     waveformShape: lerp(current.waveformShape, target.waveformShape),
     hue: lerp(current.hue, target.hue),
+    colorIntensity: lerp(
+      current.colorIntensity ?? BASE_COLOR_INTENSITY,
+      target.colorIntensity ?? BASE_COLOR_INTENSITY,
+    ),
   }
 }
 

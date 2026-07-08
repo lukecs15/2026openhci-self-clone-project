@@ -5,7 +5,8 @@
  * utils/waveformSignature.js），對話過程中以這個波形為主軸，因為 agent
  * 當下說話的情緒略為動態調整波形形狀（見 utils/emotionSignal.js），整體
  * 呈現要有沉浸感——波紋鋪滿整個 agent 方框的背景，不只是限縮在一個小圓形
- * 頭像裡。
+ * 頭像裡。除了形狀，顏色（飽和度/明亮度）也是情緒的變量（見
+ * utils/waveformColor.js）。
  *
  * ── 版面：滿版而不是圓形頭像 ──────────────────────────────────────────
  * SVG 用固定的邏輯座標系（VIEW_WIDTH × VIEW_HEIGHT）搭配
@@ -29,25 +30,36 @@
  * 不必要的 reconciliation 開銷）。真正的波形數學都在 utils/waveformPath.js
  * 的純函式裡。
  *
- * ── 情緒驅動的波形變化 ──────────────────────────────────────────────
+ * ── 情緒驅動的波形變化（形狀 + 顏色）────────────────────────────────────
  * currentText（這位 agent 最新一句話的文字，由 AgentStage.jsx 從
  * transcript 算出）透過 utils/emotionSignal.js 的 analyzeTurnEmotion()
  * 換算成情緒偏移，疊加在 persona 基準簽章上（utils/waveformSignature.js
- * 的 applyEmotionSignal()）得到「這一刻應該長怎樣」的目標簽章。實際套用到
- * 波形數學的並不是這個目標值本身，而是用 lerpSignatureTowards() 每一幀
- * 平滑地往目標值移動的「有效簽章」（effectiveSignatureRef）——這樣句子
- * 一換、情緒偏移跳動時，波形是漸變過去，不會瞬間變形。isSpeaking 一樣
- * 是離散布林值，用 lerpTowards() 平滑成 speakIntensity 中間值。
+ * 的 applyEmotionSignal()）得到「這一刻應該長怎樣」的目標簽章（同時包含
+ * 波形五個參數跟 colorIntensity）。實際套用到波形數學/顏色的並不是這個
+ * 目標值本身，而是用 lerpSignatureTowards() 每一幀平滑地往目標值移動的
+ * 「有效簽章」（effectiveSignatureRef）——這樣句子一換、情緒偏移跳動時，
+ * 波形跟顏色都是漸變過去，不會瞬間變形/變色。isSpeaking 一樣是離散布林值，
+ * 用 lerpTowards() 平滑成 speakIntensity 中間值。
+ *
+ * 顏色（hue + colorIntensity）過去是在 render 時從靜態的 signature prop
+ * 算一次，跟動畫迴圈的 effectiveSignature 完全脫鉤（情緒對顏色的偏移算了
+ * 但畫面上看不出來）。現在改成顏色也是每一幀從 effectiveSignature 用
+ * utils/waveformColor.js 算出來、透過 setAttribute 寫進 DOM，跟波形路徑
+ * 用同一個動畫迴圈更新，才能真的反映情緒變化。連帶地，SVG 內部
+ * `<linearGradient>` / `<filter>` 的 id 不能再用 hue 組字串（hue 現在會
+ * 動態變化，用它當 id 等於每次變化都要新建 DOM 元素），改用掛載時產生一次
+ * 的穩定亂數 id。
  */
 
 import { useEffect, useRef } from 'react'
 import { buildWavePath, lerpTowards } from '../utils/waveformPath'
 import { applyEmotionSignal, lerpSignatureTowards } from '../utils/waveformSignature'
 import { analyzeTurnEmotion } from '../utils/emotionSignal'
+import { buildWaveformColors } from '../utils/waveformColor'
 
 const SPEAK_INTENSITY_LERP_RATE = 0.08
 // 情緒/句子變化時，波形往新目標移動的速度比 speakIntensity 稍慢一點，
-// 讓形狀的轉變感覺是「醞釀」出來的，而不是跟著說話開關一樣立刻反應。
+// 讓形狀與顏色的轉變感覺是「醞釀」出來的，而不是跟著說話開關一樣立刻反應。
 const SIGNATURE_LERP_RATE = 0.035
 
 const VIEW_WIDTH = 240
@@ -64,19 +76,35 @@ const BANDS = Array.from({ length: BAND_COUNT }, (_, i) => {
     ampScale: 1 - distanceFromCenter * 0.6,
     phaseOffset: i * 0.55,
     opacity: 0.16 + (1 - distanceFromCenter) * 0.42,
+    lightnessOffset: i % 2 === 0 ? 4 : -4,
     isGlowSource: i === Math.floor((BAND_COUNT - 1) / 2),
   }
 })
 
+let instanceCounter = 0
+
 export default function WaveformAvatar({ signature, isSpeaking, currentText }) {
   const bandPathRefs = useRef([])
   const glowPathRef = useRef(null)
+  const bgStop0Ref = useRef(null)
+  const bgStop1Ref = useRef(null)
   const speakIntensityRef = useRef(0)
   const effectiveSignatureRef = useRef(signature)
   const targetSignatureRef = useRef(signature)
   const startTimeRef = useRef(null)
   const rafIdRef = useRef(null)
   const isSpeakingRef = useRef(isSpeaking)
+
+  // 穩定的 per-instance id，跟 hue 脫鉤（hue 現在會隨情緒動態變化，不能再
+  // 拿來組 SVG id，否則等於每次變化都要建立新的 <linearGradient>/<filter>）。
+  // 只在第一次 render 時產生一次，往後每次 render 都沿用同一個值。
+  const instanceIdRef = useRef(null)
+  if (instanceIdRef.current === null) {
+    instanceCounter += 1
+    instanceIdRef.current = `wf-${instanceCounter}`
+  }
+  const gradientId = `${instanceIdRef.current}-bg`
+  const glowFilterId = `${instanceIdRef.current}-glow`
 
   // 用 ref 保存最新的 isSpeaking，避免動畫迴圈的 useEffect 因為
   // isSpeaking 變化而整個重新掛載（重掛會讓 startTimeRef 重置、波形跳一下）。
@@ -94,7 +122,7 @@ export default function WaveformAvatar({ signature, isSpeaking, currentText }) {
   }, [signature])
 
   // 句子內容變化時（同一個 agent 講到下一句），重新算目標簽章，但不重置
-  // effectiveSignatureRef——讓動畫迴圈的 lerp 自然地從目前形狀過渡過去。
+  // effectiveSignatureRef——讓動畫迴圈的 lerp 自然地從目前形狀/顏色過渡過去。
   useEffect(() => {
     targetSignatureRef.current = applyEmotionSignal(signature, analyzeTurnEmotion(currentText))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -116,6 +144,16 @@ export default function WaveformAvatar({ signature, isSpeaking, currentText }) {
       )
       const effectiveSignature = effectiveSignatureRef.current
 
+      // 顏色（hue + colorIntensity）每一幀都跟波形一起從 effectiveSignature
+      // 重新算，才會真的反映情緒對顏色的偏移，而不是只在 mount 時算一次。
+      const colors = buildWaveformColors({
+        hue: effectiveSignature.hue,
+        colorIntensity: effectiveSignature.colorIntensity,
+      })
+      if (bgStop0Ref.current) bgStop0Ref.current.setAttribute('stop-color', colors.bgStop0)
+      if (bgStop1Ref.current) bgStop1Ref.current.setAttribute('stop-color', colors.bgStop1)
+      if (glowPathRef.current) glowPathRef.current.setAttribute('stroke', colors.glow)
+
       BANDS.forEach((band, i) => {
         const d = buildWavePath({
           signature: effectiveSignature,
@@ -128,7 +166,10 @@ export default function WaveformAvatar({ signature, isSpeaking, currentText }) {
           ampScale: band.ampScale,
         })
         const el = bandPathRefs.current[i]
-        if (el) el.setAttribute('d', d)
+        if (el) {
+          el.setAttribute('d', d)
+          el.setAttribute('stroke', colors.bandColor(band.lightnessOffset))
+        }
         if (band.isGlowSource && glowPathRef.current) {
           glowPathRef.current.setAttribute('d', d)
         }
@@ -149,11 +190,6 @@ export default function WaveformAvatar({ signature, isSpeaking, currentText }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [signature])
 
-  const hue = signature.hue
-  const gradientId = `waveform-bg-${hue}`
-  const glowFilterId = `waveform-glow-${hue}`
-  const glowColor = `hsl(${hue}, 90%, 62%)`
-
   return (
     <svg
       width="100%"
@@ -165,8 +201,8 @@ export default function WaveformAvatar({ signature, isSpeaking, currentText }) {
     >
       <defs>
         <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor={`hsl(${hue}, 55%, 15%)`} />
-          <stop offset="100%" stopColor={`hsl(${(hue + 40) % 360}, 42%, 7%)`} />
+          <stop ref={bgStop0Ref} offset="0%" />
+          <stop ref={bgStop1Ref} offset="100%" />
         </linearGradient>
         <filter id={glowFilterId} x="-40%" y="-60%" width="180%" height="220%">
           <feGaussianBlur stdDeviation="4.5" result="blur" />
@@ -182,7 +218,6 @@ export default function WaveformAvatar({ signature, isSpeaking, currentText }) {
       <path
         ref={glowPathRef}
         fill="none"
-        stroke={glowColor}
         strokeWidth={isSpeaking ? 6 : 3.5}
         strokeLinecap="round"
         opacity={0.4}
@@ -197,7 +232,6 @@ export default function WaveformAvatar({ signature, isSpeaking, currentText }) {
             bandPathRefs.current[i] = el
           }}
           fill="none"
-          stroke={`hsl(${hue}, 78%, ${62 + (i % 2 === 0 ? 4 : -4)}%)`}
           strokeWidth={isSpeaking ? 2.2 : 1.5}
           strokeLinecap="round"
           opacity={band.opacity}
