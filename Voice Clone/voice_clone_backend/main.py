@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import get_settings
-from routers import voice_profiles, ws_voice_agents
+from routers import voice_profiles, ws_debate, ws_voice_agents
 
 load_dotenv()
 
@@ -30,6 +30,7 @@ app = FastAPI(
         "→ LLM 串流（OpenAI/Gemini）→ 逐句斷句 → TTS（CosyVoice 2）。"
         f"\n\n目前硬體設定檔：{settings.device_profile}"
         "\n\nWebSocket 入口：/ws/voice-agents/{session_id}"
+        "\n辯論模式 WebSocket 入口：/ws/voice-debate/{session_id}"
         "\n聲音克隆 Profile：POST /api/voice-profiles/upload-sample -> /api/voice-profiles/clone"
     ),
     version="0.1.0",
@@ -47,6 +48,7 @@ app.add_middleware(
 
 app.include_router(voice_profiles.router, prefix="/api")
 app.include_router(ws_voice_agents.router)
+app.include_router(ws_debate.router)
 
 
 @app.get("/health", tags=["Health"])

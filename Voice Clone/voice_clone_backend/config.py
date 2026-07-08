@@ -105,6 +105,16 @@ class Settings(BaseSettings):
     # 失敗時會自動 fallback 用候選名單的第一個 agent，不會讓整輪對話卡死。
     agent_routing_llm_timeout_ms: int = 5000
 
+    # ── 辯論模式設定（agents/debate.py）───────────────────────────
+    # 兩位 agent 最多輪流講幾輪就自動結束（每位各講 max/2 次），避免使用者
+    # 忘記按暫停/結束時，背景一直呼叫 LLM 燒 API 額度、無限講下去。
+    debate_max_turns: int = 20
+    # 節奏控制：換人發言前，依該輪預估播放時長（從 TTS 音訊資料長度反推）
+    # 補一段等待，讓來回對答的節奏貼近真人聆聽速度，不會因為 TTS 是 mock
+    # （或瀏覽器 TTS）幾乎瞬間完成就完全沒有停頓感。單一輪的等待時間上限
+    # （秒），避免單輪講太長的話時節奏控制反而讓等待時間離譜地久。
+    debate_max_pacing_seconds: float = 12.0
+
     # ── 傳輸層 / 伺服器設定 ───────────────────────────────────────
     backend_host: str = "0.0.0.0"
     backend_port: int = 8200

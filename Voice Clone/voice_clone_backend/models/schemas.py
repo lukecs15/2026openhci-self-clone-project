@@ -204,3 +204,80 @@ class ServerMessage(BaseModel):
     mode: Optional[str] = None
     agent_ids: Optional[list[str]] = None
     message: Optional[str] = None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 辯論模式 WebSocket 訊息協定（agents/debate.py + routers/ws_debate.py）
+#
+# 獨立於上面「一般多 Agent 對話」協定，走不同的 WebSocket 端點
+# （/ws/voice-debate/{session_id}），因為互動模式差異較大（固定兩位 agent
+# 圍繞單一主題輪流發言、需要支援「暫停＝中斷生成」與「插話」），刻意不共用
+# ClientMessage / ServerMessage，避免兩種協定的欄位混在一起難以維護。
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# Client → Server：
+#   { "type": "init_debate_session", "topic_id": "failure" | "boundaries" | "procrastination",
+#     "agents": [AgentConfig, AgentConfig] }   # 恰好 2 位，第一位先開口
+#   { "type": "pause_debate" }                 # 立刻中斷目前正在生成/播放的那句話
+#   { "type": "user_intervene", "text": "..." }  # 插話（通常在 pause_debate 之後送出）
+#   { "type": "turn_played", "agent_id": "..." }  # 前端回報這一輪的音訊/朗讀真的播完了
+#   { "type": "end_session" }
+#
+# Server → Client：
+#   { "type": "debate_ready", "agents": [...], "topic_id": "...", "topic_title": "..." }
+#   { "type": "agent_speaking_start", "agent_id": "..." }
+#   { "type": "agent_speaking_chunk", "agent_id": "...", "text": "...", "audio": "<base64>" }
+#   { "type": "agent_speaking_end", "agent_id": "..." }
+#   { "type": "debate_paused", "agent_id": "..." }   # 暫停成功，該 agent 的生成已中斷
+#   { "type": "user_intervene_ack", "text": "..." }  # 插話已記錄，即將由暫停的 agent 接續回應
+#   { "type": "debate_finished" }                    # 達到 debate_max_turns 上限，自然結束
+#   { "type": "error", "message": "..." }
+#
+# turn_played 是修過的真實回報問題：插話後接續回應的不是被打斷的那位 agent，
+# 見 routers/ws_debate.py 檔案開頭「等待前端回報播放完成」的說明。
+
+DebateClientMessageType = Literal[
+    "init_debate_session", "pause_debate", "user_intervene", "turn_played", "end_session"
+]
+DebateServerMessageType = Literal[
+    "debate_ready",
+    "agent_speaking_start",
+    "agent_speaking_chunk",
+    "agent_speaking_end",
+    "debate_paused",
+    "user_intervene_ack",
+    "debate_finished",
+    "error",
+]
+
+
+class DebateClientMessage(BaseModel):
+    """前端送往後端的辯論模式 WebSocket 訊息 envelope。"""
+
+    type: DebateClientMessageType
+    topic_id: Optional[str] = None
+    agents: Optional[list[AgentConfig]] = None
+    text: Optional[str] = None
+    # 只有 turn_played 會帶：前端回報「這一輪播放完成」的 agent_id，純粹供
+    # 後端 log/除錯用，等待機制本身只需要「有沒有收到訊號」，不需要比對值。
+    agent_id: Optional[str] = None
+
+
+class DebateServerMessage(BaseModel):
+    """
+    後端送往前端的辯論模式 WebSocket 訊息 envelope。
+
+    routers/ws_debate.py 實際送出時直接送 dict（跟 ws_voice_agents.py 的
+    ServerMessage 一樣只當作文件用的型別參考，不強制每個事件都經過這裡
+    做一次序列化），欄位命名保持跟 ServerMessage 一致，方便前端共用同一套
+    事件處理邏輯（agent_speaking_start/chunk/end 兩種模式完全同名同義）。
+    """
+
+    type: DebateServerMessageType
+    agents: Optional[list[AgentConfig]] = None
+    topic_id: Optional[str] = None
+    topic_title: Optional[str] = None
+    agent_id: Optional[str] = None
+    text: Optional[str] = None
+    audio: Optional[str] = None  # base64
+    message: Optional[str] = None
