@@ -34,6 +34,11 @@ class DebateSession:
         self.session_id = session_id
         self.orchestrator = orchestrator
 
+    async def generate_summary(self) -> str:
+        """薄封裝，委派給 orchestrator.generate_summary()（見
+        routers/ws_debate.py 的 end_session 處理）。"""
+        return await self.orchestrator.generate_summary()
+
 
 async def _instant_pacing_sleep(seconds: float) -> None:
     """測試／CI 用的立即完成版 pacing sleep，見 build_test_debate_session()。"""

@@ -8,11 +8,20 @@
  *   - routingMode        ：最近一次路由決策（'handoff' | 'job_group' | null）
  *   - pendingAgentIds     ：最近一次路由決策指定的目標 agent id 列表
  *   - transcript         ：對話紀錄（使用者發言 + 各 agent 發言，依收到順序）
- *   - status             ：'idle' | 'connecting' | 'ready' | 'error'
+ *   - status             ：'idle' | 'connecting' | 'ready' | 'summary' | 'error'
+ *   - summaryText        ：結束對話時 LLM 生成的總結性紀念語（見 'session_summary' action）
  *   - lastError          ：最後一次錯誤訊息
  *
  * 刻意把這個 reducer 抽成與 React 無關的純函式（不依賴 useReducer 以外的東西），
  * 才能在 vitest 裡直接測試狀態轉換邏輯，不需要掛載元件或模擬 WebSocket。
+ *
+ * ── 結束對話的總結紀念語（session_summary）──────────────────────────────
+ * 使用者按下結束按鈕時，hook 會送出 end_session 給後端；後端在關閉連線前
+ * 會用整場對話歷史請 LLM 生成一句總結性的鼓勵語，透過 session_summary 事件
+ * 送回來（見 routers/ws_voice_agents.py 的 end_session 處理）。狀態切成
+ * 'summary' 讓 UI 可以切換顯示全螢幕結束畫面（SessionSummaryScreen），
+ * 不會被隨後的 WebSocket 斷線（disconnected）事件蓋掉——disconnected 只有
+ * 在還沒進入 'summary' 狀態時才會把狀態重置回 'idle'（見下方 case 'disconnected'）。
  */
 
 export const initialSessionState = {
@@ -22,6 +31,7 @@ export const initialSessionState = {
   routingMode: null,
   pendingAgentIds: [],
   transcript: [],
+  summaryText: '',
   lastError: null,
 }
 
@@ -106,6 +116,14 @@ export function agentSessionReducer(state, action) {
         activeSpeakerIds: state.activeSpeakerIds.filter((id) => id !== action.agent_id),
       }
 
+    case 'session_summary':
+      return {
+        ...state,
+        status: 'summary',
+        summaryText: action.text || '',
+        activeSpeakerIds: [],
+      }
+
     case 'error':
       return {
         ...state,
@@ -114,6 +132,12 @@ export function agentSessionReducer(state, action) {
       }
 
     case 'disconnected':
+      // 收到 session_summary 後，緊接著的 WebSocket 斷線（後端送完總結就
+      // 會 break 出主迴圈、關閉連線）不應該把狀態蓋回 'idle'——使用者應該
+      // 停留在結束畫面（SessionSummaryScreen），直到自己按下離開按鈕。
+      if (state.status === 'summary') {
+        return state
+      }
       return {
         ...state,
         status: 'idle',

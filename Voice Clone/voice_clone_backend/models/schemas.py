@@ -167,6 +167,7 @@ class RoutingDecision:
 #   { "type": "agent_speaking_chunk", "agent_id": "...", "text": "...", "audio": "<base64>" }
 #   { "type": "agent_speaking_end", "agent_id": "..." }
 #   { "type": "routing_decision", "mode": "handoff" | "job_group", "agent_ids": [...] }
+#   { "type": "session_summary", "text": "..." }  # end_session 收到後，關閉連線前送出的總結紀念語
 #   { "type": "error", "message": "..." }
 
 ClientMessageType = Literal["init_session", "user_audio", "user_text", "end_session"]
@@ -177,6 +178,7 @@ ServerMessageType = Literal[
     "agent_speaking_chunk",
     "agent_speaking_end",
     "routing_decision",
+    "session_summary",
     "error",
 ]
 
@@ -231,6 +233,7 @@ class ServerMessage(BaseModel):
 #   { "type": "debate_paused", "agent_id": "..." }   # 暫停成功，該 agent 的生成已中斷
 #   { "type": "user_intervene_ack", "text": "..." }  # 插話已記錄，即將由暫停的 agent 接續回應
 #   { "type": "debate_finished" }                    # 達到 debate_max_turns 上限，自然結束
+#   { "type": "session_summary", "text": "..." }      # end_session 收到後，關閉連線前送出的總結紀念語
 #   { "type": "error", "message": "..." }
 #
 # turn_played 是修過的真實回報問題：插話後接續回應的不是被打斷的那位 agent，
@@ -247,6 +250,7 @@ DebateServerMessageType = Literal[
     "debate_paused",
     "user_intervene_ack",
     "debate_finished",
+    "session_summary",
     "error",
 ]
 

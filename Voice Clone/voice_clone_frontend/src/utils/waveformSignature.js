@@ -230,5 +230,64 @@ export function lerpSignatureTowards(current, target, rate) {
   }
 }
 
+/**
+ * 把多位 agent 的波形簽章平均成一個共同的基準簽章，供對話/辯論結束時的
+ * 「融合波形」結束畫面使用（見 SessionSummaryScreen.jsx）。
+ *
+ * 設計理由（對照確認的方案「平均簽章＋套用總結句子的情緒」）：
+ *   - frequency / amplitude / waveHeight / waveformShape / colorIntensity
+ *     都是線性數值，直接算術平均即可。
+ *   - hue 是角度（0～360 循環），不能直接算術平均——例如 350 度跟 10 度的
+ *     算術平均是 180 度（正對面的顏色，完全錯誤），正確答案應該是 0 度。
+ *     這裡改用「取各角度的單位向量、平均後再轉回角度」的標準圓形平均
+ *     （circular mean）算法。
+ *   - 回傳的是「平均後的基準值」，呼叫端之後還會再用 applyEmotionSignal()
+ *     疊加總結句子的情緒訊號，這裡不處理情緒。
+ *
+ * @param {Array<{frequency:number, amplitude:number, waveHeight:number, waveformShape:number, hue:number, colorIntensity?:number}>} signatures
+ * @returns {{presetName: string, frequency:number, amplitude:number, waveHeight:number, waveformShape:number, hue:number, colorIntensity:number}}
+ */
+export function mergeWaveformSignatures(signatures) {
+  const list = (signatures || []).filter(Boolean)
+  if (list.length === 0) {
+    // 理論上不會發生（呼叫端只會在至少有一位 agent 參與過對話時才呼叫），
+    // 保底回傳一個中性的簽章，避免呼叫端要另外處理「空陣列」這種邊界情況。
+    return {
+      presetName: '融合',
+      frequency: 1.2,
+      amplitude: 0.3,
+      waveHeight: 0.75,
+      waveformShape: 0.3,
+      hue: 200,
+      colorIntensity: BASE_COLOR_INTENSITY,
+    }
+  }
+
+  const avg = (key, fallback = 0) =>
+    list.reduce((sum, s) => sum + (s[key] ?? fallback), 0) / list.length
+
+  // 圓形平均：把每個 hue 轉成單位向量再平均，避免直線平均在跨過 0/360
+  // 邊界時算出錯誤結果。
+  let sinSum = 0
+  let cosSum = 0
+  list.forEach((s) => {
+    const rad = ((s.hue ?? 0) * Math.PI) / 180
+    sinSum += Math.sin(rad)
+    cosSum += Math.cos(rad)
+  })
+  const avgHueRad = Math.atan2(sinSum / list.length, cosSum / list.length)
+  const avgHue = (Math.round((avgHueRad * 180) / Math.PI) + 360) % 360
+
+  return {
+    presetName: '融合',
+    frequency: clamp(avg('frequency'), ...BOUNDS.frequency),
+    amplitude: clamp(avg('amplitude'), ...BOUNDS.amplitude),
+    waveHeight: clamp(avg('waveHeight'), ...BOUNDS.waveHeight),
+    waveformShape: clamp(avg('waveformShape'), ...BOUNDS.waveformShape),
+    hue: avgHue,
+    colorIntensity: clamp(avg('colorIntensity', BASE_COLOR_INTENSITY), ...BOUNDS.colorIntensity),
+  }
+}
+
 /** 匯出供測試/未來擴充使用（例如問卷介面想提供「參考現有原型」的選單）。 */
 export const WAVEFORM_PRESETS = PRESETS

@@ -33,6 +33,19 @@
  *     agent 回覆的文字唸出來。
  *   - 用瀏覽器語音辨識：後端 STT 是 mock，或（辯論模式）後端本來就沒有
  *     語音插話這條路徑時，用 Web Speech API 就地辨識你說的話再送出。
+ *
+ * ── 結束對話／討論後的總結畫面（SessionSummaryScreen）─────────────────
+ * 兩個模式都有一顆不具干擾性的結束按鈕（一般對話模式的按鈕比照辯論模式
+ * DebateStage.jsx 既有的半透明右下角按鈕設計，見下方 chat 分支）。按下後
+ * 呼叫 hook 的 endSession()（送出 end_session），後端會用整場對話歷史生成
+ * 一句總結性紀念語，透過 session_summary 事件送回來，reducer 收到後把
+ * status 轉成 'summary'。這裡偵測到 status==='summary' 時改渲染
+ * SessionSummaryScreen（全螢幕沉浸式結束畫面，顯示融合波形 + 總結句子），
+ * 蓋住原本的對話 UI，直到使用者按下畫面上的離開按鈕（handleLeave* 函式）
+ * 才真正斷線、重置 reducer 狀態、回到最初的模式選擇畫面——刻意不在按下
+ * 「結束對話／討論」按鈕的當下就立刻斷線，因為那樣會來不及收到後端送回來
+ * 的 session_summary（WebSocket 斷線前才會送出，見
+ * routers/ws_voice_agents.py / routers/ws_debate.py 的 end_session 處理）。
  */
 
 import { useMemo, useState } from 'react'
@@ -48,6 +61,7 @@ import MicControl from '../components/MicControl'
 import VoiceProfileUploader from '../components/VoiceProfileUploader'
 import DebateStage from '../components/DebateStage'
 import DevToggleLabel from '../components/DevToggleLabel'
+import SessionSummaryScreen from '../components/SessionSummaryScreen'
 
 const ROUTING_STRATEGY_OPTIONS = [
   { value: '', label: '使用後端設定（.env 的 AGENT_ROUTING_STRATEGY）' },
@@ -77,6 +91,7 @@ export default function VoiceAgentsPage() {
   const [appMode, setAppMode] = useState('chat') // 'chat' | 'debate'
   const [debateTopicId, setDebateTopicId] = useState('')
   const [debateAgentIds, setDebateAgentIds] = useState([])
+  const [chatEndHovered, setChatEndHovered] = useState(false)
 
   const chat = useVoiceAgentSession(chatSessionId)
   const debate = useDebateSession(debateSessionId)
@@ -113,9 +128,29 @@ export default function VoiceAgentsPage() {
     setStarted(true)
   }
 
+  // 按下「結束對話／討論」按鈕：只送出 end_session，*不*立刻斷線——後端會
+  // 先生成總結（session_summary 事件）才真的關閉連線，這裡提早斷線會讓
+  // 前端永遠收不到這個事件（見檔案開頭「結束對話／討論後的總結畫面」說明）。
+  const handleEndChatSession = () => {
+    chat.endSession()
+  }
+
   const handleEndDebateSession = () => {
     debate.endSession()
+  }
+
+  // SessionSummaryScreen 按下離開按鈕才是真正的收尾：斷線、把 reducer 狀態
+  // 重置回初始值（避免下一次重新開始時畫面殘留上一場的 transcript／
+  // summaryText／status），回到模式選擇畫面。
+  const handleLeaveChatSummary = () => {
+    chat.disconnect()
+    chat.reset()
+    setStarted(false)
+  }
+
+  const handleLeaveDebateSummary = () => {
     debate.disconnect()
+    debate.reset()
     setStarted(false)
     setDebateTopicId('')
     setDebateAgentIds([])
@@ -281,46 +316,86 @@ export default function VoiceAgentsPage() {
             </button>
           </div>
         ) : appMode === 'chat' ? (
-          <>
-            <AgentStage
+          chat.state.status === 'summary' ? (
+            <SessionSummaryScreen
               agents={chat.state.agents}
-              activeSpeakerIds={chat.state.activeSpeakerIds}
-              pendingAgentIds={chat.state.pendingAgentIds}
-              routingMode={chat.state.routingMode}
-              transcript={chat.state.transcript}
+              summaryText={chat.state.summaryText}
+              onLeave={handleLeaveChatSummary}
             />
-            <DevToggleLabel
-              checked={chat.browserTtsEnabled}
-              disabled={!chat.isBrowserTtsSupported}
-              onChange={(e) => chat.toggleBrowserTts(e.target.checked)}
-              title={
-                chat.isBrowserTtsSupported
-                  ? '後端 TTS 若還是 mock（靜音），開啟這個開關可以用瀏覽器內建語音朗讀 agent 的文字，方便測試播放時序，不影響實際 CosyVoice 2 克隆語音功能'
-                  : '目前瀏覽器不支援 Web Speech API'
-              }
-            >
-              用瀏覽器語音朗讀（TTS 為 mock 時的測試用替代方案）
-            </DevToggleLabel>
-            <DevToggleLabel
-              checked={chat.browserSttEnabled}
-              disabled={!chat.isBrowserSttSupported}
-              onChange={(e) => chat.toggleBrowserStt(e.target.checked)}
-              title={
-                chat.isBrowserSttSupported
-                  ? '後端 STT 若還是 mock（永遠回固定文字），開啟這個開關後「按住說話」改用瀏覽器內建語音辨識，辨識完直接以文字送出，不影響實際 Breeze ASR/faster-whisper 功能'
-                  : '目前瀏覽器不支援 Web Speech API'
-              }
-            >
-              用瀏覽器語音辨識（STT 為 mock 時的測試用替代方案）
-            </DevToggleLabel>
-            <TranscriptLog transcript={chat.state.transcript} agents={chat.state.agents} />
-            <MicControl
-              isRecording={chat.isRecording}
-              onStartRecording={chat.startRecording}
-              onStopRecording={chat.stopRecording}
-              onSendText={chat.sendText}
-            />
-          </>
+          ) : (
+            <>
+              <AgentStage
+                agents={chat.state.agents}
+                activeSpeakerIds={chat.state.activeSpeakerIds}
+                pendingAgentIds={chat.state.pendingAgentIds}
+                routingMode={chat.state.routingMode}
+                transcript={chat.state.transcript}
+              />
+              <DevToggleLabel
+                checked={chat.browserTtsEnabled}
+                disabled={!chat.isBrowserTtsSupported}
+                onChange={(e) => chat.toggleBrowserTts(e.target.checked)}
+                title={
+                  chat.isBrowserTtsSupported
+                    ? '後端 TTS 若還是 mock（靜音），開啟這個開關可以用瀏覽器內建語音朗讀 agent 的文字，方便測試播放時序，不影響實際 CosyVoice 2 克隆語音功能'
+                    : '目前瀏覽器不支援 Web Speech API'
+                }
+              >
+                用瀏覽器語音朗讀（TTS 為 mock 時的測試用替代方案）
+              </DevToggleLabel>
+              <DevToggleLabel
+                checked={chat.browserSttEnabled}
+                disabled={!chat.isBrowserSttSupported}
+                onChange={(e) => chat.toggleBrowserStt(e.target.checked)}
+                title={
+                  chat.isBrowserSttSupported
+                    ? '後端 STT 若還是 mock（永遠回固定文字），開啟這個開關後「按住說話」改用瀏覽器內建語音辨識，辨識完直接以文字送出，不影響實際 Breeze ASR/faster-whisper 功能'
+                    : '目前瀏覽器不支援 Web Speech API'
+                }
+              >
+                用瀏覽器語音辨識（STT 為 mock 時的測試用替代方案）
+              </DevToggleLabel>
+              <TranscriptLog transcript={chat.state.transcript} agents={chat.state.agents} />
+              <MicControl
+                isRecording={chat.isRecording}
+                onStartRecording={chat.startRecording}
+                onStopRecording={chat.stopRecording}
+                onSendText={chat.sendText}
+              />
+
+              {/* 不具干擾性的結束按鈕：固定右下角、預設低存在感，比照
+                  DebateStage.jsx 既有的半透明按鈕設計，滑鼠移過去才變明顯。 */}
+              <button
+                onClick={handleEndChatSession}
+                onMouseEnter={() => setChatEndHovered(true)}
+                onMouseLeave={() => setChatEndHovered(false)}
+                title="結束對話，回到初始畫面"
+                style={{
+                  position: 'fixed',
+                  right: '1.25rem',
+                  bottom: '1.25rem',
+                  padding: '0.55rem 1rem',
+                  borderRadius: '999px',
+                  border: 'none',
+                  background: '#1e293b',
+                  color: '#e2e8f0',
+                  fontSize: '0.75rem',
+                  cursor: 'pointer',
+                  opacity: chatEndHovered ? 0.9 : 0.35,
+                  transition: 'opacity 0.2s',
+                  boxShadow: chatEndHovered ? '0 2px 10px rgba(0,0,0,0.35)' : 'none',
+                }}
+              >
+                結束對話
+              </button>
+            </>
+          )
+        ) : debate.state.status === 'summary' ? (
+          <SessionSummaryScreen
+            agents={debate.state.agents}
+            summaryText={debate.state.summaryText}
+            onLeave={handleLeaveDebateSummary}
+          />
         ) : (
           <DebateStage
             agents={debate.state.agents}

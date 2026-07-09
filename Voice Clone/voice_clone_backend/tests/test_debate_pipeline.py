@@ -59,6 +59,24 @@ def test_build_debate_session_reads_max_turns_from_settings(monkeypatch, sample_
     assert session.orchestrator.max_turns == 3
 
 
+@pytest.mark.asyncio
+async def test_debate_session_generate_summary_delegates_to_orchestrator(sample_agents):
+    """DebateSession.generate_summary() 是薄封裝，委派給
+    orchestrator.generate_summary()（見 routers/ws_debate.py 的
+    end_session 處理）。"""
+    session = build_test_debate_session(
+        session_id="session-summary",
+        agent_a=sample_agents[0],
+        agent_b=sample_agents[1],
+        topic=DEFAULT_DEBATE_TOPICS["failure"],
+    )
+
+    summary = await session.generate_summary()
+
+    assert isinstance(summary, str)
+    assert summary
+
+
 def test_build_debate_session_reads_max_pacing_seconds_from_settings(monkeypatch, sample_agents):
     custom_settings = Settings(debate_max_pacing_seconds=3.5)
     monkeypatch.setattr(debate_pipeline_module, "get_settings", lambda: custom_settings)

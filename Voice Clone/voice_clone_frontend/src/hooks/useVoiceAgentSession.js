@@ -42,6 +42,32 @@
  * （playQueuesRef，未來接上 CosyVoice 2 時的真實/mock 音訊）不受影響，
  * 仍然是每個 agent 各自獨立播放，可以真的同時發聲。
  *
+ * ── 結束對話要立刻打斷正在播放的聲音（修過的真實回報問題）──────────────
+ * 第一版 endSession() 只是送出 end_session 訊息，沒有做任何本地停止播放的
+ * 動作——跟辯論模式的 useDebateSession.js 不一樣，辯論模式一開始就需要
+ * 「暫停」這個互動（stopAllPlaybackImmediately()），一般多 Agent 對話原本
+ * 沒有中途打斷的需求，所以完全沒有這一塊。新增結束按鈕之後，使用者實測
+ * 發現按下「結束對話」時，如果剛好有 agent 正在講話，聲音會繼續播完，沒有
+ * 立刻安靜下來。原因有兩個，都要處理：
+ *   1. 本地已經排進 playQueuesRef／speechQueueRef 佇列、甚至正在播放的音訊
+ *      /瀏覽器朗讀，endSession() 完全沒有去停止它們。
+ *   2. 後端 ws_voice_agents.py 的主收訊迴圈在處理 user_text 時是「同步跑完
+ *      這一輪所有 agent 的完整回覆才會再去收下一則訊息」（不像辯論模式特地
+ *      用背景 asyncio.Task 讓暫停可以插隊），所以就算送出 end_session，
+ *      後端也要等目前這輪生成完全跑完才會真的處理它，這段期間陸續送達的
+ *      agent_speaking_chunk 事件如果前端沒有擋掉，一樣會被排進佇列播放。
+ * 修法（跟 useDebateSession.js 的 stopAllPlaybackImmediately() 同樣思路，
+ * 額外多一個「已結束」旗標處理第 2 點）：
+ *   - stopAllPlaybackImmediately()：立刻 stop() 掉每個 agent 目前正在播放
+ *     的 AudioBufferSourceNode（activeSourcesRef 記錄每個 agent「目前
+ *     正在播放的那個」）、cancel() 瀏覽器朗讀、讓 playbackEpochRef 遞增，
+ *     使佇列裡任何「還沒真的開始播放」的項目之後執行到時直接跳過（用法
+ *     跟 useDebateSession.js 的 dispatchEpochRef 相同概念）。
+ *   - sessionEndedRef：endSession() 呼叫時設成 true，之後（理論上因為
+ *     第 2 點）陸續抵達的 agent_speaking_chunk 一律不再排進播放佇列——
+ *     不只是「停掉現在在播的」，是「結束之後收到的新音訊也不要播」。
+ *     下一次 connect()（重新開始新的一場對話）會重置回 false。
+ *
  * TODO: 加入 WebSocket 自動重連
  */
 
@@ -84,6 +110,15 @@ export function useVoiceAgentSession(sessionId) {
   // 瀏覽器 TTS 朗讀改用「單一全域佇列」，理由見檔案開頭說明（window.speechSynthesis
   // 是整個分頁共用的單一引擎，分開排隊會導致跨 agent 播放順序交錯）。
   const speechQueueRef = useRef(Promise.resolve())
+  // 每個 agent「目前正在播放」的 AudioBufferSourceNode，結束對話時要能
+  // 直接 stop() 掉它們（見檔案開頭「結束對話要立刻打斷正在播放的聲音」說明）。
+  const activeSourcesRef = useRef({})
+  // 結束對話時遞增，讓佇列裡還沒真的開始播放的音訊/朗讀之後執行到時直接
+  // 跳過，不會在「結束」之後又冒出殘留的聲音。
+  const playbackEpochRef = useRef(0)
+  // 已經按下結束對話：之後（理論上因為後端還在跑完目前這輪）陸續抵達的
+  // agent_speaking_chunk 一律不再排進播放佇列。
+  const sessionEndedRef = useRef(false)
   const mediaRecorderRef = useRef(null)
   const audioChunksRef = useRef([])
 
@@ -99,7 +134,14 @@ export function useVoiceAgentSession(sessionId) {
 
   const enqueueSpeechForAgent = useCallback((agentId, text) => {
     if (!text) return
-    speechQueueRef.current = speechQueueRef.current.then(() => speakWithBrowserTts(text, agentId))
+    // 捕捉當下的 epoch：等這句真的輪到要唸的時候，如果使用者已經按了結束
+    // 對話（epoch 已經被 stopAllPlaybackImmediately() 遞增），就直接跳過，
+    // 不要在「結束」之後才冒出這句話的朗讀聲。
+    const epoch = playbackEpochRef.current
+    speechQueueRef.current = speechQueueRef.current.then(() => {
+      if (playbackEpochRef.current !== epoch) return Promise.resolve()
+      return speakWithBrowserTts(text, agentId)
+    })
   }, [])
 
   const getAudioContext = useCallback(() => {
@@ -117,19 +159,36 @@ export function useVoiceAgentSession(sessionId) {
       const bytes = new Uint8Array(binary.length)
       for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
 
+      // 見 enqueueSpeechForAgent 的同樣理由：捕捉當下 epoch，執行到這個
+      // chunk 時如果 epoch 已經對不上（結束對話期間被作廢），直接跳過。
+      const epoch = playbackEpochRef.current
       if (!playQueuesRef.current[agentId]) {
         playQueuesRef.current[agentId] = Promise.resolve()
       }
       playQueuesRef.current[agentId] = playQueuesRef.current[agentId].then(
         () =>
           new Promise((resolve) => {
+            if (playbackEpochRef.current !== epoch) {
+              resolve()
+              return
+            }
             ctx.decodeAudioData(
               bytes.buffer.slice(0),
               (buffer) => {
+                if (playbackEpochRef.current !== epoch) {
+                  resolve()
+                  return
+                }
                 const source = ctx.createBufferSource()
                 source.buffer = buffer
                 source.connect(ctx.destination)
-                source.onended = resolve
+                source.onended = () => {
+                  if (activeSourcesRef.current[agentId] === source) {
+                    delete activeSourcesRef.current[agentId]
+                  }
+                  resolve()
+                }
+                activeSourcesRef.current[agentId] = source
                 source.start()
               },
               () => resolve(), // 解碼失敗（例如 mock 靜音資料）就跳過，不中斷佇列
@@ -139,6 +198,33 @@ export function useVoiceAgentSession(sessionId) {
     },
     [getAudioContext],
   )
+
+  /**
+   * 立刻停掉所有 agent 目前正在播放的音訊、取消瀏覽器朗讀，並讓佇列裡還
+   * 沒真的開始播放的項目全部作廢——結束對話（endSession）時呼叫。跟
+   * useDebateSession.js 的同名函式思路相同，差別是這裡要同時處理「多個
+   * agent 各自的播放佇列」（辯論模式同一時間只有一位 agent 在講話，一般
+   * 多 Agent 對話的 Job Group 平行模式可能好幾個 agent 同時在播）。
+   */
+  const stopAllPlaybackImmediately = useCallback(() => {
+    playbackEpochRef.current += 1
+    playQueuesRef.current = {}
+    speechQueueRef.current = Promise.resolve()
+
+    Object.values(activeSourcesRef.current).forEach((source) => {
+      try {
+        source.stop()
+      } catch {
+        // 音訊已經播完或已經停止時 stop() 可能丟例外，忽略即可
+      }
+    })
+    activeSourcesRef.current = {}
+
+    // window.speechSynthesis.cancel() 在部分瀏覽器不保證立即中斷，保險起見
+    // 連續呼叫兩次（見 useDebateSession.js 的同一處理法說明）。
+    window.speechSynthesis?.cancel()
+    window.speechSynthesis?.cancel()
+  }, [])
 
   /** 連線 OPEN 時直接送出；還沒 OPEN 就先排進佇列，等 onopen 再 drain。 */
   const safeSend = useCallback((payload) => {
@@ -152,6 +238,9 @@ export function useVoiceAgentSession(sessionId) {
 
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return
+    // 開始新的一場對話：重置「已結束」旗標，避免上一場按過結束對話之後，
+    // 這一場的音訊/朗讀被誤判成「結束後陸續抵達的殘留事件」而被跳過。
+    sessionEndedRef.current = false
     dispatch({ type: 'connecting' })
 
     const url = `${WS_BASE}/ws/voice-agents/${sessionId}`
@@ -187,6 +276,11 @@ export function useVoiceAgentSession(sessionId) {
       }
 
       dispatch(payload)
+      // 已經按下結束對話：後端可能還在跑完目前這一輪才會真的處理
+      // end_session（見檔案開頭「結束對話要立刻打斷正在播放的聲音」說明），
+      // 這段期間陸續送達的音訊/文字不再排進播放佇列，避免結束之後又冒出
+      // 新的聲音。
+      if (sessionEndedRef.current) return
       if (payload.type === 'agent_speaking_chunk' && payload.audio) {
         enqueueAudioForAgent(payload.agent_id, payload.audio)
       }
@@ -250,8 +344,22 @@ export function useVoiceAgentSession(sessionId) {
   )
 
   const endSession = useCallback(() => {
+    // 先讓使用者「馬上聽不到聲音」，再送出 end_session（見檔案開頭「結束
+    // 對話要立刻打斷正在播放的聲音」說明；跟 useDebateSession.js 的
+    // endSession() 同樣的順序考量，前端這步不需要等後端回應）。
+    sessionEndedRef.current = true
+    stopAllPlaybackImmediately()
     safeSend(buildEndSessionMessage())
-  }, [safeSend])
+  }, [safeSend, stopAllPlaybackImmediately])
+
+  /**
+   * 結束畫面（SessionSummaryScreen）按下離開按鈕時呼叫：把 reducer 狀態
+   * 重置回 initialSessionState，避免下一次重新開始對話時，畫面殘留上一場
+   * 對話的 transcript／summaryText／status（見 disconnect() 之後接著呼叫）。
+   */
+  const reset = useCallback(() => {
+    dispatch({ type: 'reset' })
+  }, [])
 
   const startMediaRecorderRecording = useCallback(async () => {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
@@ -323,6 +431,7 @@ export function useVoiceAgentSession(sessionId) {
     sendText,
     sendAudioBase64,
     endSession,
+    reset,
     startRecording,
     stopRecording,
     browserTtsEnabled,

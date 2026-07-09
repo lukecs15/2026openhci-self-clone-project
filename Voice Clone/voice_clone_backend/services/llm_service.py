@@ -186,15 +186,28 @@ class MockLLMService(LLMService):
     用於單元測試 SentenceAggregator 與多 Agent 編排邏輯，不需要 API key。
     """
 
-    def __init__(self, scripted_reply: str = "你好，很高興認識你！這是一段測試回覆。"):
+    # agents/orchestrator.py 與 agents/debate.py 的 generate_summary() 都固定
+    # 用 agent_id="summary" 呼叫 stream_reply()（見兩檔案的說明），這裡用同一個
+    # id 判斷要回傳「總結用」的固定腳本，而不是一般對話回覆的 scripted_reply，
+    # 讓沒有接真實 LLM 的開發環境也能看到完整的「結束畫面」體驗（有一句看起來
+    # 像總結的鼓勵語，而不是每次都吐出跟一般回覆一樣的測試句子）。
+    DEFAULT_SUMMARY_REPLY = "願你把今天說出口的每一句話，都當作送給未來自己的一份禮物。"
+
+    def __init__(
+        self,
+        scripted_reply: str = "你好，很高興認識你！這是一段測試回覆。",
+        summary_reply: str = DEFAULT_SUMMARY_REPLY,
+    ):
         self._scripted_reply = scripted_reply
+        self._summary_reply = summary_reply
 
     async def stream_reply(
         self, agent_id: str, system_prompt: str, messages: list[dict]
     ) -> AsyncIterator[LLMTextChunk]:
         import asyncio
 
-        for ch in self._scripted_reply:
+        reply = self._summary_reply if agent_id == "summary" else self._scripted_reply
+        for ch in reply:
             await asyncio.sleep(0)
             yield LLMTextChunk(agent_id=agent_id, delta_text=ch)
         yield LLMTextChunk(agent_id=agent_id, delta_text="", is_final=True)

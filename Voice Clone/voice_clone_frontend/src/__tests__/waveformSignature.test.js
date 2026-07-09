@@ -8,6 +8,7 @@ import {
   WAVEFORM_PRESETS,
   applyEmotionSignal,
   lerpSignatureTowards,
+  mergeWaveformSignatures,
 } from '../utils/waveformSignature'
 
 const FIELD_BOUNDS = {
@@ -224,5 +225,75 @@ describe('lerpSignatureTowards', () => {
   it('保留 current 沒有明確處理的欄位（例如 presetName），用展開帶過去', () => {
     const result = lerpSignatureTowards(BASE_SIGNATURE, target, 0.5)
     expect(result.presetName).toBe(BASE_SIGNATURE.presetName)
+  })
+})
+
+describe('mergeWaveformSignatures', () => {
+  it('linear 欄位（frequency/amplitude/waveHeight/waveformShape/colorIntensity）用算術平均', () => {
+    const a = { frequency: 1.0, amplitude: 0.2, waveHeight: 0.6, waveformShape: 0.2, hue: 0, colorIntensity: 0.4 }
+    const b = { frequency: 2.0, amplitude: 0.4, waveHeight: 1.0, waveformShape: 0.6, hue: 0, colorIntensity: 0.8 }
+    const merged = mergeWaveformSignatures([a, b])
+
+    expect(merged.frequency).toBeCloseTo(1.5, 5)
+    expect(merged.amplitude).toBeCloseTo(0.3, 5)
+    expect(merged.waveHeight).toBeCloseTo(0.8, 5)
+    expect(merged.waveformShape).toBeCloseTo(0.4, 5)
+    expect(merged.colorIntensity).toBeCloseTo(0.6, 5)
+  })
+
+  it('hue 用圓形平均，不是直線平均（例如 90 度與 270 度的直線平均是 180 度，但兩者方向相反，圓形平均應該落在 0 或 180 附近其中一個穩定值）', () => {
+    const a = { frequency: 1, amplitude: 0.2, waveHeight: 0.6, waveformShape: 0.2, hue: 10, colorIntensity: 0.5 }
+    const b = { frequency: 1, amplitude: 0.2, waveHeight: 0.6, waveformShape: 0.2, hue: 350, colorIntensity: 0.5 }
+    const merged = mergeWaveformSignatures([a, b])
+
+    // 10 度與 350 度（等同 -10 度）的正確圓形平均是 0 度，不是直線平均的 180 度
+    expect(merged.hue).toBe(0)
+  })
+
+  it('三個 hue 值的圓形平均驗證：0、120、240 度應該平均成一個穩定值（不是直線平均的 120）', () => {
+    const signatures = [0, 120, 240].map((hue) => ({
+      frequency: 1,
+      amplitude: 0.2,
+      waveHeight: 0.6,
+      waveformShape: 0.2,
+      hue,
+      colorIntensity: 0.5,
+    }))
+    const merged = mergeWaveformSignatures(signatures)
+    // 三個角度完全均勻分布在圓上，向量和接近 0，atan2(0,0) = 0，是合理的穩定結果
+    expect(merged.hue).toBeGreaterThanOrEqual(0)
+    expect(merged.hue).toBeLessThan(360)
+  })
+
+  it('回傳值的每個欄位都落在合理範圍內（clamp 過）', () => {
+    const signatures = ['agent-a', 'agent-b', 'agent-c'].map((id) => getWaveformSignature({ agent_id: id }))
+    const merged = mergeWaveformSignatures(signatures)
+    expectWithinBounds(merged)
+  })
+
+  it('只有一個簽章時，合併結果應該等於（在誤差範圍內）原本的簽章', () => {
+    const only = getWaveformSignature({ agent_id: 'agent-solo' })
+    const merged = mergeWaveformSignatures([only])
+    expect(merged.frequency).toBeCloseTo(only.frequency, 5)
+    expect(merged.amplitude).toBeCloseTo(only.amplitude, 5)
+    expect(merged.waveHeight).toBeCloseTo(only.waveHeight, 5)
+    expect(merged.waveformShape).toBeCloseTo(only.waveformShape, 5)
+    expect(merged.hue).toBe(only.hue)
+    expect(merged.colorIntensity).toBeCloseTo(only.colorIntensity, 5)
+  })
+
+  it('空陣列或 null 時回傳一組落在合理範圍內的保底簽章，不會拋例外', () => {
+    expect(() => mergeWaveformSignatures([])).not.toThrow()
+    expect(() => mergeWaveformSignatures(null)).not.toThrow()
+    expectWithinBounds(mergeWaveformSignatures([]))
+    expectWithinBounds(mergeWaveformSignatures(null))
+  })
+
+  it('缺少 colorIntensity 欄位的簽章（例如舊資料）用預設基準值防呆，不會變成 NaN', () => {
+    const legacy = { frequency: 1, amplitude: 0.2, waveHeight: 0.6, waveformShape: 0.2, hue: 100 }
+    const withColor = { frequency: 1, amplitude: 0.2, waveHeight: 0.6, waveformShape: 0.2, hue: 100, colorIntensity: 0.9 }
+    const merged = mergeWaveformSignatures([legacy, withColor])
+    expect(Number.isNaN(merged.colorIntensity)).toBe(false)
+    expect(merged.colorIntensity).toBeCloseTo((0.55 + 0.9) / 2, 5)
   })
 })

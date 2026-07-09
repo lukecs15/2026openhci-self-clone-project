@@ -388,3 +388,62 @@ async def test_run_next_turn_defaults_to_real_asyncio_sleep_when_not_injected(sa
     )
 
     assert debate._pacing_sleep_fn is asyncio.sleep
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# generate_summary() — 結束辯論時生成一句總結性紀念語（見
+# routers/ws_debate.py 的 end_session 處理）
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_generate_summary_formats_history_with_topic_and_uses_summary_agent_id(sample_agents):
+    """
+    跟 agents/orchestrator.py 的 generate_summary() 邏輯相同，差別是
+    system prompt 要額外扣合 debate.topic.title；歷史紀錄格式沿用
+    _build_messages() 的「顯示名稱／使用者：內容」慣例。
+    """
+    captured: dict[str, object] = {}
+
+    class _CapturingLLMService:
+        async def stream_reply(self, agent_id, system_prompt, messages):
+            captured["agent_id"] = agent_id
+            captured["system_prompt"] = system_prompt
+            captured["messages"] = messages
+            yield LLMTextChunk(agent_id=agent_id, delta_text="願你在下一次挫折來臨時，")
+            yield LLMTextChunk(agent_id=agent_id, delta_text="記得自己已經更堅強了。")
+            yield LLMTextChunk(agent_id=agent_id, delta_text="", is_final=True)
+
+    debate = _build_debate(sample_agents, topic_id="failure", llm_service=_CapturingLLMService())
+    debate.history = [
+        {"role": "user", "text": "（主持人）今天的討論主題是：如何面對失敗與挫折。"},
+        {"role": "assistant", "agent_id": "agent-a", "text": "失敗只是暫時的。"},
+        {"role": "assistant", "agent_id": "agent-b", "text": "重點是從中學習。"},
+    ]
+
+    summary = await debate.generate_summary()
+
+    assert summary == "願你在下一次挫折來臨時，記得自己已經更堅強了。"
+    assert captured["agent_id"] == "summary"
+    assert debate.topic.title in captured["system_prompt"]
+    assert captured["messages"] == [
+        {
+            "role": "user",
+            "content": (
+                "以下是這場討論的紀錄：\n"
+                "使用者：（主持人）今天的討論主題是：如何面對失敗與挫折。\n"
+                "小明：失敗只是暫時的。\n"
+                "小華：重點是從中學習。"
+            ),
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_generate_summary_returns_fallback_sentence_when_history_empty(sample_agents):
+    debate = _build_debate(sample_agents)
+    assert debate.history == []
+
+    summary = await debate.generate_summary()
+
+    assert isinstance(summary, str)
+    assert summary

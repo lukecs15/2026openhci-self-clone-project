@@ -362,6 +362,16 @@ export function useDebateSession(sessionId) {
     safeSend(buildEndDebateSessionMessage())
   }, [safeSend, stopAllPlaybackImmediately])
 
+  /**
+   * 結束畫面（SessionSummaryScreen）按下離開按鈕時呼叫：跟
+   * useVoiceAgentSession.js 的 reset() 相同理由，把 reducer 狀態重置回
+   * initialDebateState，避免下一次重新開始討論時畫面殘留上一場的
+   * transcript／summaryText／status。
+   */
+  const reset = useCallback(() => {
+    dispatch({ type: 'reset' })
+  }, [])
+
   useEffect(() => () => disconnect(), [disconnect])
 
   return {
@@ -372,6 +382,7 @@ export function useDebateSession(sessionId) {
     pauseDebate,
     sendIntervention,
     endSession,
+    reset,
     browserTtsEnabled,
     toggleBrowserTts,
     isBrowserTtsSupported: isBrowserTtsSupported(),

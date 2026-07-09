@@ -106,6 +106,41 @@ describe('debateSessionReducer', () => {
     expect(next.activeSpeakerIds).toEqual([])
   })
 
+  it('session_summary 把 status 轉成 summary、記錄 summaryText、清空 activeSpeakerIds', () => {
+    const state = { ...initialDebateState, status: 'finished', activeSpeakerIds: ['a'] }
+    const next = debateSessionReducer(state, {
+      type: 'session_summary',
+      text: '願你在下一次挫折來臨時，記得自己已經更堅強了。',
+    })
+    expect(next.status).toBe('summary')
+    expect(next.summaryText).toBe('願你在下一次挫折來臨時，記得自己已經更堅強了。')
+    expect(next.activeSpeakerIds).toEqual([])
+  })
+
+  it('session_summary 沒有帶 text 時 summaryText 是空字串（不是 undefined）', () => {
+    const next = debateSessionReducer(initialDebateState, { type: 'session_summary' })
+    expect(next.summaryText).toBe('')
+  })
+
+  it('disconnected 在 status 已經是 summary 時不會把狀態蓋回 idle（讓使用者停留在結束畫面）', () => {
+    const summaryState = debateSessionReducer(initialDebateState, {
+      type: 'session_summary',
+      text: '總結句子',
+    })
+    const next = debateSessionReducer(summaryState, { type: 'disconnected' })
+    expect(next.status).toBe('summary')
+    expect(next.summaryText).toBe('總結句子')
+  })
+
+  it('reset 把狀態完全還原成 initialDebateState（離開結束畫面時使用）', () => {
+    const summaryState = debateSessionReducer(initialDebateState, {
+      type: 'session_summary',
+      text: '總結句子',
+    })
+    const next = debateSessionReducer(summaryState, { type: 'reset' })
+    expect(next).toEqual(initialDebateState)
+  })
+
   it('未知 action type 回傳原本 state（不變）', () => {
     const next = debateSessionReducer(initialDebateState, { type: 'unknown_action' })
     expect(next).toBe(initialDebateState)

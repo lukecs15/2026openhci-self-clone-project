@@ -120,6 +120,26 @@ _DEBATE_INSTRUCTION_TEMPLATE = (
 )
 
 
+# 辯論結束時用來生成「總結紀念語」的 system prompt，跟
+# agents/orchestrator.py 的 _SUMMARY_SYSTEM_PROMPT 用途相同（同一套
+# MockLLMService agent_id == "summary" 判斷邏輯也共用），差別是這裡會
+# 額外把辯論主題（topic.title）帶進 prompt，讓總結能扣合主題本身，不只是
+# 針對逐字內容。
+_DEBATE_SUMMARY_SYSTEM_PROMPT_TEMPLATE = (
+    "你是一位溫暖、有洞察力的陪伴者。使用者剛剛聆聽完一場圍繞著"
+    "「{topic_title}」這個自我省思／自我成長主題的雙 Agent 討論或辯論，"
+    "以下是這場討論的逐字紀錄。請根據主題與對話內容，生成「一句」溫暖、"
+    "勵志、帶有心靈雞湯或鼓勵意涵的總結話語，作為使用者結束體驗後可以帶走"
+    "的紀念語。\n"
+    "要求：\n"
+    "1. 只輸出一句話（可以是一個完整的句子，不要條列、不要標題、不要換行）。\n"
+    "2. 語氣溫暖真誠，盡量扣合這個主題與對話中實際出現的內容或情緒，不要"
+    "空泛制式。\n"
+    "3. 使用繁體中文。\n"
+    "4. 不要加上引號或任何前綴（例如「總結：」），直接輸出這句話本身。"
+)
+
+
 def _audio_duration_ms(audio_bytes: Optional[bytes], sample_rate: int) -> float:
     """
     估計一段 16-bit mono PCM 音訊的播放時長（毫秒）。
@@ -327,3 +347,39 @@ class DebateOrchestrator:
                 "ttfb_ms": chunk.ttfb_ms,
             }
             is_first_chunk_of_sentence = False
+
+    def _format_history_for_summary(self) -> str:
+        """跟 orchestrator._format_history_for_summary 相同邏輯：把
+        self.history 整理成「顯示名稱／使用者：內容」逐行文字。"""
+        lines: list[str] = []
+        for turn in self.history:
+            if turn["role"] == "user":
+                lines.append(f"使用者：{turn['text']}")
+                continue
+            speaker = self._agents_by_id.get(turn.get("agent_id"))
+            speaker_name = speaker.display_name if speaker else turn.get("agent_id", "assistant")
+            lines.append(f"{speaker_name}：{turn['text']}")
+        return "\n".join(lines)
+
+    async def generate_summary(self) -> str:
+        """
+        辯論結束時呼叫：把整場討論歷史（含主題）整理成文字，請 LLM 生成
+        一句總結性的鼓勵話語，作為使用者可以帶走的紀念品（見
+        routers/ws_debate.py 的 end_session 處理）。設計理由同
+        agents/orchestrator.py 的 generate_summary()：不重用
+        _build_messages()，改成一次性塞進單一個 user message，agent_id
+        固定用 "summary"。
+        """
+        transcript = self._format_history_for_summary()
+        if not transcript:
+            return "謝謝你今天願意花時間傾聽與思考，每一次自我對話都是成長的養分。"
+
+        system_prompt = _DEBATE_SUMMARY_SYSTEM_PROMPT_TEMPLATE.format(topic_title=self.topic.title)
+        messages = [{"role": "user", "content": f"以下是這場討論的紀錄：\n{transcript}"}]
+
+        full_text_parts: list[str] = []
+        async for token in self.llm_service.stream_reply("summary", system_prompt, messages):
+            if token.is_final:
+                break
+            full_text_parts.append(token.delta_text)
+        return "".join(full_text_parts).strip()

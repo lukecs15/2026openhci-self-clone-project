@@ -10,10 +10,17 @@
  * 把 WebSocket 收到的 server 訊息（見 voice_clone_backend/models/schemas.py
  * 的 DebateServerMessage）轉換成 UI 狀態，刻意抽成與 React 無關的純函式，
  * 方便在 vitest 裡直接測試狀態轉換邏輯。
+ *
+ * ── 結束討論的總結紀念語（session_summary）──────────────────────────────
+ * 跟 store/agentSessionReducer.js 的 session_summary 處理邏輯相同：使用者
+ * 按下結束按鈕（不管當下是 'ready'、'paused' 還是 'finished' 狀態，見
+ * routers/ws_debate.py 的 end_session 處理都一律先取消背景生成 task 再產生
+ * 總結）都可以轉進 'summary' 狀態，UI 切換顯示全螢幕結束畫面
+ * （SessionSummaryScreen），隨後而來的 WebSocket 斷線事件不會把狀態蓋掉。
  */
 
 export const initialDebateState = {
-  status: 'idle', // 'idle' | 'connecting' | 'ready' | 'paused' | 'finished' | 'error'
+  status: 'idle', // 'idle' | 'connecting' | 'ready' | 'paused' | 'finished' | 'summary' | 'error'
   agents: [],
   topicId: null,
   topicTitle: '',
@@ -21,6 +28,7 @@ export const initialDebateState = {
   pausedAgentId: null,
   transcript: [],
   isFinished: false,
+  summaryText: '',
   lastError: null,
 }
 
@@ -113,10 +121,23 @@ export function debateSessionReducer(state, action) {
     case 'debate_finished':
       return { ...state, status: 'finished', isFinished: true, activeSpeakerIds: [] }
 
+    case 'session_summary':
+      return {
+        ...state,
+        status: 'summary',
+        summaryText: action.text || '',
+        activeSpeakerIds: [],
+      }
+
     case 'error':
       return { ...state, status: 'error', lastError: action.message }
 
     case 'disconnected':
+      // 跟 agentSessionReducer 相同理由：session_summary 之後緊接著的斷線
+      // 不應該把狀態蓋回 'idle'，使用者應該停留在結束畫面直到自己按離開。
+      if (state.status === 'summary') {
+        return state
+      }
       return { ...state, status: 'idle', activeSpeakerIds: [] }
 
     case 'reset':

@@ -128,6 +128,41 @@ describe('agentSessionReducer', () => {
     expect(next.activeSpeakerIds).toEqual([])
   })
 
+  it('session_summary 把 status 轉成 summary、記錄 summaryText、清空 activeSpeakerIds', () => {
+    const state = { ...initialSessionState, status: 'ready', activeSpeakerIds: ['a', 'b'] }
+    const next = agentSessionReducer(state, {
+      type: 'session_summary',
+      text: '願你帶著今天的收穫，繼續勇敢向前。',
+    })
+    expect(next.status).toBe('summary')
+    expect(next.summaryText).toBe('願你帶著今天的收穫，繼續勇敢向前。')
+    expect(next.activeSpeakerIds).toEqual([])
+  })
+
+  it('session_summary 沒有帶 text 時 summaryText 是空字串（不是 undefined）', () => {
+    const next = agentSessionReducer(initialSessionState, { type: 'session_summary' })
+    expect(next.summaryText).toBe('')
+  })
+
+  it('disconnected 在 status 已經是 summary 時不會把狀態蓋回 idle（讓使用者停留在結束畫面）', () => {
+    const summaryState = agentSessionReducer(initialSessionState, {
+      type: 'session_summary',
+      text: '總結句子',
+    })
+    const next = agentSessionReducer(summaryState, { type: 'disconnected' })
+    expect(next.status).toBe('summary')
+    expect(next.summaryText).toBe('總結句子')
+  })
+
+  it('reset 把狀態完全還原成 initialSessionState（離開結束畫面時使用）', () => {
+    const summaryState = agentSessionReducer(initialSessionState, {
+      type: 'session_summary',
+      text: '總結句子',
+    })
+    const next = agentSessionReducer(summaryState, { type: 'reset' })
+    expect(next).toEqual(initialSessionState)
+  })
+
   it('未知 action type 回傳原本 state（不變）', () => {
     const next = agentSessionReducer(initialSessionState, { type: 'unknown_action' })
     expect(next).toBe(initialSessionState)

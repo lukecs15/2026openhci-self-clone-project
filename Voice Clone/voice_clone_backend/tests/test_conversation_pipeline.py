@@ -36,6 +36,25 @@ async def test_build_test_session_end_to_end_audio_flow(sample_agents):
     assert any(e["type"] == "agent_speaking_start" for e in events)
 
 
+@pytest.mark.asyncio
+async def test_conversation_session_generate_summary_delegates_to_orchestrator(sample_agents):
+    """
+    ConversationSession.generate_summary() 是薄封裝，委派給
+    orchestrator.generate_summary()（見 routers/ws_voice_agents.py 的
+    end_session 處理）。
+    """
+    session = build_test_conversation_session(session_id="test-session-summary", agents=sample_agents)
+    session.orchestrator.history = [
+        {"role": "user", "text": "今天過得不太順"},
+        {"role": "assistant", "agent_id": "agent-a", "text": "明天會更好的。"},
+    ]
+
+    summary = await session.generate_summary()
+
+    assert isinstance(summary, str)
+    assert summary  # MockLLMService 的固定總結腳本，非空字串
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # _resolve_default_llm_service — 修過的耦合問題：LLM 的 mock 與否現在只看
 # 是否已填 API key，不再被 TTS_ENGINE=mock 連帶影響。

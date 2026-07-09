@@ -270,6 +270,18 @@ async def voice_debate_endpoint(ws: WebSocket, session_id: str):
 
             elif msg.type == "end_session":
                 logger.info("辯論 Session 結束：session_id=%s", session_id)
+                # 必須先取消背景的 _run_debate_loop task，理由：
+                #   1. 避免它繼續往 event_queue 塞下一輪事件，跟即將送出的
+                #      session_summary 搶時序。
+                #   2. 跟 pause_debate / user_intervene 用同一套收尾方式，
+                #      不需要另外處理「task 還在跑」的情況。
+                await _cancel_debate_task()
+                if session is not None:
+                    try:
+                        summary_text = await session.generate_summary()
+                        await _send(ws, {"type": "session_summary", "text": summary_text})
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("生成結束總結失敗，略過：%s", exc)
                 break
 
     except WebSocketDisconnect:

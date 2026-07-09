@@ -59,6 +59,11 @@ class ConversationSession:
         async for event in self.orchestrator.handle_user_text(text):
             yield event
 
+    async def generate_summary(self) -> str:
+        """薄封裝，委派給 orchestrator.generate_summary()（見
+        routers/ws_voice_agents.py 的 end_session 處理）。"""
+        return await self.orchestrator.generate_summary()
+
 
 def _resolve_default_llm_service(settings: Settings) -> LLMService:
     """

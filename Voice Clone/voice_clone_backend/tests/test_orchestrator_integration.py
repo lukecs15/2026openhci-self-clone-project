@@ -352,3 +352,67 @@ async def test_agent_speaks_with_assigned_voice_profile(tmp_path, monkeypatch):
     assert any(e["type"] == "agent_speaking_chunk" for e in events)
     assert mock_tts.last_resolved_profile is not None
     assert mock_tts.last_resolved_profile.profile_id == profile.profile_id
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# generate_summary() — 結束對話時生成一句總結性紀念語（見
+# routers/ws_voice_agents.py 的 end_session 處理）
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_generate_summary_formats_history_and_uses_summary_agent_id(sample_agents):
+    """
+    generate_summary() 應該把 self.history 整理成「顯示名稱：內容」逐行文字
+    塞進單一個 user message，並固定用 agent_id="summary" 呼叫
+    llm_service.stream_reply()（不對應任何一位 agent，MockLLMService 用同一個
+    id 判斷要回傳「總結用」腳本，見 services/llm_service.py）。
+    """
+    captured: dict[str, object] = {}
+
+    class _CapturingLLMService:
+        async def stream_reply(self, agent_id, system_prompt, messages):
+            captured["agent_id"] = agent_id
+            captured["system_prompt"] = system_prompt
+            captured["messages"] = messages
+            yield LLMTextChunk(agent_id=agent_id, delta_text="願你帶著今天的收穫，")
+            yield LLMTextChunk(agent_id=agent_id, delta_text="繼續勇敢向前。")
+            yield LLMTextChunk(agent_id=agent_id, delta_text="", is_final=True)
+
+    orch = MultiAgentOrchestrator(
+        agents=sample_agents,
+        stt_service=STTService(primary_engine=MockSTTEngine(), fallback_engine=MockSTTEngine()),
+        llm_service=_CapturingLLMService(),
+        tts_service=MockTTSService(),
+    )
+    orch.history = [
+        {"role": "user", "text": "最近工作上遇到一些挫折"},
+        {"role": "assistant", "agent_id": "agent-a", "text": "挫折其實是成長的養分。"},
+    ]
+
+    summary = await orch.generate_summary()
+
+    assert summary == "願你帶著今天的收穫，繼續勇敢向前。"
+    assert captured["agent_id"] == "summary"
+    assert captured["messages"] == [
+        {
+            "role": "user",
+            "content": (
+                "以下是這場對話的紀錄：\n"
+                "使用者：最近工作上遇到一些挫折\n"
+                "小明：挫折其實是成長的養分。"
+            ),
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_generate_summary_returns_fallback_sentence_when_history_empty(sample_agents):
+    """理論上不會發生（呼叫端通常已經有至少一輪對話），但空歷史時也要有
+    保底句子，不應該回傳空字串。"""
+    orch = _build_mock_orchestrator(sample_agents)
+    assert orch.history == []
+
+    summary = await orch.generate_summary()
+
+    assert isinstance(summary, str)
+    assert summary

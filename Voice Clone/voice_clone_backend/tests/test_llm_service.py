@@ -18,7 +18,7 @@ import types
 
 import pytest
 
-from services.llm_service import LLMService, _to_gemini_role
+from services.llm_service import LLMService, MockLLMService, _to_gemini_role
 
 
 def test_to_gemini_role_maps_assistant_to_model():
@@ -95,4 +95,39 @@ async def test_stream_gemini_translates_assistant_role_in_history(monkeypatch):
 
     full_text = "".join(c.delta_text for c in chunks if not c.is_final)
     assert full_text == "你好！"
+    assert chunks[-1].is_final is True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MockLLMService — agent_id="summary" 應回傳「總結用」腳本而非一般 scripted_reply
+# （見 agents/orchestrator.py / agents/debate.py 的 generate_summary()）
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_mock_llm_service_uses_summary_reply_for_summary_agent_id():
+    """
+    agents/orchestrator.py 與 agents/debate.py 的 generate_summary() 都固定
+    用 agent_id="summary" 呼叫 stream_reply()。MockLLMService 應該用這個 id
+    判斷要回傳「總結用」的固定腳本，而不是一般對話的 scripted_reply，讓沒接
+    真實 LLM 的開發環境也能看到有意義的「結束總結」內容。
+    """
+    service = MockLLMService(scripted_reply="一般回覆", summary_reply="總結回覆")
+
+    normal_chunks = [c async for c in service.stream_reply("agent-a", "sp", [])]
+    normal_text = "".join(c.delta_text for c in normal_chunks if not c.is_final)
+    assert normal_text == "一般回覆"
+
+    summary_chunks = [c async for c in service.stream_reply("summary", "sp", [])]
+    summary_text = "".join(c.delta_text for c in summary_chunks if not c.is_final)
+    assert summary_text == "總結回覆"
+
+
+@pytest.mark.asyncio
+async def test_mock_llm_service_default_summary_reply_is_nonempty():
+    service = MockLLMService()
+
+    chunks = [c async for c in service.stream_reply("summary", "sp", [])]
+    text = "".join(c.delta_text for c in chunks if not c.is_final)
+
+    assert text  # 有預設的鼓勵語，不是空字串
     assert chunks[-1].is_final is True

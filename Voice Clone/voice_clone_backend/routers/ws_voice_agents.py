@@ -21,7 +21,15 @@ Server → Client：
     { "type": "agent_speaking_start", "agent_id": "..." }
     { "type": "agent_speaking_chunk", "agent_id": "...", "text": "...", "audio": "<base64>" }
     { "type": "agent_speaking_end", "agent_id": "..." }
+    { "type": "session_summary", "text": "..." }
     { "type": "error", "message": "..." }
+
+end_session 收到後，如果已經 init_session（session 不是 None），會先呼叫
+session.generate_summary()（見 pipeline/conversation_pipeline.py /
+agents/orchestrator.py）用整段對話歷史請 LLM 生成一句總結性的鼓勵語，
+以 session_summary 事件送給前端，前端可以用這句話 + 融合波形做結束畫面
+（見 useVoiceAgentSession.js），送完才真正斷線。生成失敗（例如 LLM API
+逾時/出錯）只記 log、不阻塞斷線流程，避免使用者卡在「按了結束卻沒反應」。
 
 init_session 一律走 build_conversation_session()（見 pipeline/conversation_pipeline.py），
 STT/LLM/TTS 三者各自依 config.py 設定獨立決定要不要 mock：STT 一律走真正的
@@ -131,6 +139,12 @@ async def voice_agents_endpoint(ws: WebSocket, session_id: str):
 
             elif msg.type == "end_session":
                 logger.info("Session 結束：session_id=%s", session_id)
+                if session is not None:
+                    try:
+                        summary_text = await session.generate_summary()
+                        await _send(ws, {"type": "session_summary", "text": summary_text})
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("生成結束總結失敗，略過：%s", exc)
                 break
 
     except WebSocketDisconnect:
