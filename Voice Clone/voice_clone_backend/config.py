@@ -88,7 +88,24 @@ class Settings(BaseSettings):
     cosyvoice_server_host: str = "127.0.0.1"
     cosyvoice_server_port: int = 8100
     cosyvoice_model_path: str = ""
+    # 修過的真實問題：CosyVoice2-0.5B 在 RTX 5090（Blackwell）+ torch 2.11 這套
+    # 環境下，zero-shot 合成出來的中文語音會嚴重跑掉（內容錯誤、不是退化
+    # 重複，token 序列統計正常，但 LLM 生成的語音 token 內容本身不對）。
+    # 排查過程排除了套件版本、attention 實作、position_ids、詞彙表大小、
+    # tokenizer、fp16、TF32 等變因，改用官方建議、架構較新的 CosyVoice3
+    # （Fun-CosyVoice3-0.5B）後實測品質正常，因此 prod 預設改用 cosyvoice3。
+    # 下載方式（見 CosyVoice/README.md）：
+    #   python -c "from modelscope import snapshot_download; \
+    #     snapshot_download('FunAudioLLM/Fun-CosyVoice3-0.5B-2512', \
+    #     local_dir='pretrained_models/Fun-CosyVoice3-0.5B')"
+    cosyvoice_model_version: Literal["cosyvoice2", "cosyvoice3"] = "cosyvoice3"
     cosyvoice_taiwan_lora_path: str = ""
+    # 沒有指定 voice_profile_id（或 profile 缺 reference_text）時使用的預設
+    # zero-shot 官方音色；留空則自動 fallback 用 CosyVoice repo 內附的
+    # asset/zero_shot_prompt.wav + 官方範例逐字稿（見 services/tts_service.py
+    # 的 _default_prompt()）。
+    cosyvoice_default_prompt_wav: str = ""
+    cosyvoice_default_prompt_text: str = ""
 
     # ── 使用者聲音克隆 Profile 設定 ───────────────────────────────
     voice_profiles_dir: str = "voice_profiles"
@@ -156,19 +173,30 @@ class Settings(BaseSettings):
 
     def apply_profile_defaults(self) -> "Settings":
         """
-        依 device_profile 套用硬體對應預設值（僅在使用者未於 .env 明確覆寫時生效）。
+        依 device_profile 套用硬體對應預設值。
+
+        用 model_fields_set 判斷欄位「是否已被 .env / 環境變數明確設定」，
+        而不是比較目前值是否等於某個特定字串——後者在使用者明確指定的值
+        剛好跟 class 預設值相同時會誤判成「沒設定」而覆寫掉。修過的真實
+        bug：.env 明確寫 STT_PRIMARY_ENGINE=faster_whisper（因為 Breeze ASR
+        尚未整合實際推理，見 services/stt_service.py），舊邏輯仍會因為這個
+        值剛好等於 class 預設值而誤判成「沒設定」，把它硬改成 breeze，導致
+        正式環境語音輸入直接因為 NotImplementedError 壞掉。
         """
-        if self.device_profile == "prod":
-            if self.torch_dtype == "float16":
-                self.torch_dtype = "bfloat16"
-            if self.whisper_model == "small":
-                self.whisper_model = "large-v3"
-            if not self.breeze_asr_enabled:
-                self.breeze_asr_enabled = True
-            if self.stt_primary_engine == "faster_whisper":
-                self.stt_primary_engine = "breeze"
-            if self.tts_engine == "mock":
-                self.tts_engine = "cosyvoice2"
+        if self.device_profile != "prod":
+            return self
+
+        fields_set = self.model_fields_set
+        if "torch_dtype" not in fields_set and self.torch_dtype == "float16":
+            self.torch_dtype = "bfloat16"
+        if "whisper_model" not in fields_set and self.whisper_model == "small":
+            self.whisper_model = "large-v3"
+        if "breeze_asr_enabled" not in fields_set:
+            self.breeze_asr_enabled = True
+        if "stt_primary_engine" not in fields_set:
+            self.stt_primary_engine = "breeze"
+        if "tts_engine" not in fields_set:
+            self.tts_engine = "cosyvoice2"
         return self
 
 

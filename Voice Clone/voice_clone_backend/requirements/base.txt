@@ -20,12 +20,20 @@ openai>=1.30.0
 google-generativeai>=0.8.0
 
 # 音訊處理
-# 注意：pydub 需要系統安裝 ffmpeg（用來解碼瀏覽器 MediaRecorder 輸出的
-# webm/opus，soundfile 本身不支援這個容器格式）。
-#   Windows: choco install ffmpeg  /  Mac: brew install ffmpeg  /  Linux: apt install ffmpeg
+# soundfile 涵蓋 WAV/FLAC/OGG-Vorbis 等；瀏覽器 MediaRecorder 輸出的
+# webm/opus 或使用者上傳的 m4a/mp3 這類 soundfile 不支援的容器，改用 PyAV
+# （`av` 套件，見 stt_service.py 的 _decode_with_pyav()）解碼。
+#
+# 修過的真實問題：一開始用 pydub + 系統 ffmpeg，Windows 正式機常沒把
+# ffmpeg 加進 PATH；改成 pydub + imageio-ffmpeg 內附執行檔後仍然失敗，
+# 因為 pydub 轉檔前會呼叫 mediainfo_json()，這步是另外透過
+# pydub.utils.get_prober_name() 找系統 PATH 上的 ffprobe/avprobe，
+# 完全不理會可覆寫的 AudioSegment.converter/ffmpeg 屬性。PyAV 直接連結
+# ffmpeg 的共用函式庫（libavformat/libavcodec），wheel 內已附帶對應平台的
+# 函式庫，不需要任何外部執行檔或 PATH 設定，因此拿掉 pydub/imageio-ffmpeg。
 numpy>=1.26.0,<2.0.0
 soundfile>=0.12.1
-pydub>=0.25.1
+av>=12.0.0
 
 # 測試
 pytest>=8.0.0

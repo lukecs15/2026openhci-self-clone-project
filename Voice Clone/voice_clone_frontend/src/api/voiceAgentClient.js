@@ -129,3 +129,23 @@ export async function listVoiceProfiles() {
   if (!res.ok) throw new Error(`取得聲音克隆 profile 列表失敗（${res.status}）`)
   return res.json()
 }
+
+/**
+ * 修正既有 profile 的逐字稿／名稱，不需重新錄音上傳。
+ * 用途：自動轉錄（STT）偶爾會失敗或產生幻覺文字（例如重複音節），
+ * 讓使用者能直接修正成音訊實際內容，改善 CosyVoice 2 zero-shot 克隆品質。
+ * @param {string} profileId
+ * @param {{reference_text?: string, label?: string}} updates
+ */
+export async function updateVoiceProfile(profileId, updates) {
+  const res = await fetch(`${API_BASE_URL}/voice-profiles/${profileId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  })
+  if (!res.ok) {
+    const detail = await res.text()
+    throw new Error(`更新聲音克隆 profile 失敗（${res.status}）：${detail}`)
+  }
+  return res.json()
+}

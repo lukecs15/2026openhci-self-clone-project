@@ -299,9 +299,7 @@ class DebateOrchestrator:
                     sentence_text = self._strip_leading_speaker_prefix(sentence_text)
                     is_first_sentence = False
                 async for tts_event in self._synthesize_and_wrap(agent, sentence_text):
-                    total_audio_ms += _audio_duration_ms(
-                        tts_event.get("audio_bytes"), tts_event.get("sample_rate", 24000)
-                    )
+                    total_audio_ms += self._estimate_event_duration_ms(tts_event)
                     yield tts_event
 
         for sentence in aggregator.flush():
@@ -310,9 +308,7 @@ class DebateOrchestrator:
                 sentence_text = self._strip_leading_speaker_prefix(sentence_text)
                 is_first_sentence = False
             async for tts_event in self._synthesize_and_wrap(agent, sentence_text):
-                total_audio_ms += _audio_duration_ms(
-                    tts_event.get("audio_bytes"), tts_event.get("sample_rate", 24000)
-                )
+                total_audio_ms += self._estimate_event_duration_ms(tts_event)
                 yield tts_event
 
         # ---- 節奏控制（見檔案開頭說明）----
@@ -328,58 +324,61 @@ class DebateOrchestrator:
         self.current_speaker_id = self._other_agent_id(agent_id)
         yield {"type": "agent_speaking_end", "agent_id": agent_id}
 
+    def _estimate_event_duration_ms(self, tts_event: dict) -> float:
+        """
+        估算一個 agent_speaking_chunk 事件對應的播放時長（見檔案開頭「節奏
+        控制」說明）。
+
+        修過的真實問題：TTS 合成失敗時（見 _synthesize_and_wrap 的
+        tts_error 分支）audio_bytes 一定是空的，如果照舊只從 audio_bytes
+        長度反推時長，算出來永遠是 0——節奏控制形同虛設，兩位 agent 會
+        完全沒有停頓地飛快輪流講下去（使用者實測回報過的真實問題）。
+        這裡改成：有 tts_error 時改用文字長度粗估（跟 MockTTSService
+        一致的估法：中文每字約 0.2 秒），沒有 tts_error 時才用原本的
+        音訊資料長度反推。
+        """
+        if tts_event.get("tts_error"):
+            text_len = len(tts_event.get("text") or "")
+            return max(text_len * 200.0, 500.0)
+        return _audio_duration_ms(tts_event.get("audio_bytes"), tts_event.get("sample_rate", 24000))
+
     async def _synthesize_and_wrap(self, agent: AgentConfig, sentence: str) -> AsyncIterator[dict]:
         """
         跟 orchestrator._synthesize_and_wrap 相同邏輯：一句只在第一個音訊
         chunk 帶文字；額外帶上 sample_rate，供 run_next_turn() 估算播放
-        時長（見 _audio_duration_ms()）。
+        時長（見 _audio_duration_ms() / _estimate_event_duration_ms()）。
+
+        修過的真實問題：CosyVoice 2 合成失敗時（例如模型推理錯誤）以前會
+        整個 exception 往外傳，讓 run_next_turn()、_run_debate_loop() 的
+        背景 task 直接掛掉、整場辯論無聲無息地卡死（debate_task 拋出的
+        例外沒有人接住，之後就再也不會有新的一輪）。現在改成：合成失敗時
+        記錄清楚的錯誤 log，並且仍然吐出一個 agent_speaking_chunk 事件
+        （文字照常顯示/寫入歷史，audio_bytes 留空、標記 tts_error），讓
+        辯論可以繼續進行下去，只是這一句沒有聲音——比整場卡死或完全沒有
+        感覺地飛快跳下一輪都更接近「優雅降級」。
         """
         is_first_chunk_of_sentence = True
-        async for chunk in self.tts_service.synthesize(agent.agent_id, sentence, agent.voice_profile_id):
-            if chunk.is_final:
-                continue
+        try:
+            async for chunk in self.tts_service.synthesize(agent.agent_id, sentence, agent.voice_profile_id):
+                if chunk.is_final:
+                    continue
+                yield {
+                    "type": "agent_speaking_chunk",
+                    "agent_id": agent.agent_id,
+                    "text": sentence if is_first_chunk_of_sentence else "",
+                    "audio_bytes": chunk.audio_bytes,
+                    "sample_rate": chunk.sample_rate,
+                    "ttfb_ms": chunk.ttfb_ms,
+                }
+                is_first_chunk_of_sentence = False
+        except Exception as exc:  # noqa: BLE001
+            logger.error("TTS 合成失敗（agent=%s, sentence=%s）：%s", agent.agent_id, sentence[:30], exc)
             yield {
                 "type": "agent_speaking_chunk",
                 "agent_id": agent.agent_id,
                 "text": sentence if is_first_chunk_of_sentence else "",
-                "audio_bytes": chunk.audio_bytes,
-                "sample_rate": chunk.sample_rate,
-                "ttfb_ms": chunk.ttfb_ms,
+                "audio_bytes": b"",
+                "sample_rate": 24000,
+                "ttfb_ms": None,
+                "tts_error": str(exc),
             }
-            is_first_chunk_of_sentence = False
-
-    def _format_history_for_summary(self) -> str:
-        """跟 orchestrator._format_history_for_summary 相同邏輯：把
-        self.history 整理成「顯示名稱／使用者：內容」逐行文字。"""
-        lines: list[str] = []
-        for turn in self.history:
-            if turn["role"] == "user":
-                lines.append(f"使用者：{turn['text']}")
-                continue
-            speaker = self._agents_by_id.get(turn.get("agent_id"))
-            speaker_name = speaker.display_name if speaker else turn.get("agent_id", "assistant")
-            lines.append(f"{speaker_name}：{turn['text']}")
-        return "\n".join(lines)
-
-    async def generate_summary(self) -> str:
-        """
-        辯論結束時呼叫：把整場討論歷史（含主題）整理成文字，請 LLM 生成
-        一句總結性的鼓勵話語，作為使用者可以帶走的紀念品（見
-        routers/ws_debate.py 的 end_session 處理）。設計理由同
-        agents/orchestrator.py 的 generate_summary()：不重用
-        _build_messages()，改成一次性塞進單一個 user message，agent_id
-        固定用 "summary"。
-        """
-        transcript = self._format_history_for_summary()
-        if not transcript:
-            return "謝謝你今天願意花時間傾聽與思考，每一次自我對話都是成長的養分。"
-
-        system_prompt = _DEBATE_SUMMARY_SYSTEM_PROMPT_TEMPLATE.format(topic_title=self.topic.title)
-        messages = [{"role": "user", "content": f"以下是這場討論的紀錄：\n{transcript}"}]
-
-        full_text_parts: list[str] = []
-        async for token in self.llm_service.stream_reply("summary", system_prompt, messages):
-            if token.is_final:
-                break
-            full_text_parts.append(token.delta_text)
-        return "".join(full_text_parts).strip()

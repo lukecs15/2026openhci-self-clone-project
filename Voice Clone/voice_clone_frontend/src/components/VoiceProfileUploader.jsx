@@ -10,8 +10,24 @@
  */
 
 import { useRef, useState } from 'react'
-import { cloneVoiceFromRecording } from '../api/voiceAgentClient'
+import { cloneVoiceFromRecording, updateVoiceProfile } from '../api/voiceAgentClient'
 import { ASSIGN_TARGET_ALL } from '../store/voiceProfileAssignment'
+
+/**
+ * 前端版的「疑似 ASR 幻覺」偵測，邏輯對應後端
+ * services/voice_profile_service.py 的 _looks_like_asr_hallucination。
+ * 這裡只是提示使用者「這段逐字稿看起來怪怪的，建議手動修正」，真正擋掉
+ * 幻覺文字進入克隆推理的把關仍在後端（自動轉錄當下就會擋）；這裡主要是
+ * 涵蓋「沒觸發後端門檻但品質仍不夠好」的情況，讓使用者能自行判斷修正。
+ */
+function looksSuspicious(text) {
+  const stripped = (text || '').replace(/\s/g, '')
+  if (stripped.length < 6) return false
+  const counts = {}
+  for (const ch of stripped) counts[ch] = (counts[ch] || 0) + 1
+  const maxCount = Math.max(...Object.values(counts))
+  return maxCount / stripped.length > 0.4
+}
 
 /**
  * @param {Object} props
@@ -25,6 +41,8 @@ export default function VoiceProfileUploader({ agents, onApply }) {
   const [errorMessage, setErrorMessage] = useState('')
   const [profile, setProfile] = useState(null)
   const [assignTarget, setAssignTarget] = useState(ASSIGN_TARGET_ALL)
+  const [editedText, setEditedText] = useState('')
+  const [savingText, setSavingText] = useState(false)
 
   const mediaRecorderRef = useRef(null)
   const chunksRef = useRef([])
@@ -57,6 +75,7 @@ export default function VoiceProfileUploader({ agents, onApply }) {
       const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
       const created = await cloneVoiceFromRecording(blob, '我的聲音')
       setProfile(created)
+      setEditedText(created.reference_text || '')
       setStatus('done')
     } catch (err) {
       setErrorMessage(err.message || '建立聲音克隆 profile 失敗')
@@ -72,6 +91,7 @@ export default function VoiceProfileUploader({ agents, onApply }) {
     try {
       const created = await cloneVoiceFromRecording(file, file.name)
       setProfile(created)
+      setEditedText(created.reference_text || '')
       setStatus('done')
     } catch (err) {
       setErrorMessage(err.message || '建立聲音克隆 profile 失敗')
@@ -82,6 +102,20 @@ export default function VoiceProfileUploader({ agents, onApply }) {
   const handleApply = () => {
     if (!profile) return
     onApply(profile.profile_id, assignTarget)
+  }
+
+  const handleSaveText = async () => {
+    if (!profile) return
+    setSavingText(true)
+    setErrorMessage('')
+    try {
+      const updated = await updateVoiceProfile(profile.profile_id, { reference_text: editedText })
+      setProfile(updated)
+    } catch (err) {
+      setErrorMessage(err.message || '更新逐字稿失敗')
+    } finally {
+      setSavingText(false)
+    }
   }
 
   return (
@@ -122,9 +156,44 @@ export default function VoiceProfileUploader({ agents, onApply }) {
 
       {profile && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          <span style={{ fontSize: '0.8rem', color: '#a5b4fc' }}>
-            已建立：{profile.label}（逐字稿：{profile.reference_text || '（無，可能自動轉錄失敗）'}）
-          </span>
+          <span style={{ fontSize: '0.8rem', color: '#a5b4fc' }}>已建立：{profile.label}</span>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+            <span style={{ fontSize: '0.75rem', color: '#64748b' }}>
+              參考音訊逐字稿（務必跟音檔實際內容一致，否則克隆出的聲音可能會不穩定或重複亂念）：
+            </span>
+            <textarea
+              value={editedText}
+              onChange={(e) => setEditedText(e.target.value)}
+              rows={2}
+              placeholder="（無，可能自動轉錄失敗或偵測到疑似錯誤的轉錄結果，請手動輸入音檔實際念的內容）"
+              style={{
+                background: '#020617',
+                color: '#e2e8f0',
+                border: `1px solid ${looksSuspicious(editedText) ? '#ef4444' : '#334155'}`,
+                borderRadius: '0.4rem',
+                padding: '0.4rem 0.5rem',
+                fontSize: '0.75rem',
+                resize: 'vertical',
+              }}
+            />
+            {looksSuspicious(editedText) && (
+              <span style={{ fontSize: '0.7rem', color: '#ef4444' }}>
+                這段逐字稿看起來像是重複字元的異常結果（常見於自動辨識對過短/過安靜音訊的誤判），
+                建議改成音檔實際念出的文字後再套用。
+              </span>
+            )}
+            <div>
+              <button
+                onClick={handleSaveText}
+                disabled={savingText || editedText === (profile.reference_text || '')}
+                style={buttonStyle('#334155')}
+              >
+                {savingText ? '儲存中…' : '儲存逐字稿修正'}
+              </button>
+            </div>
+          </div>
+
           <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
             <span style={{ fontSize: '0.75rem', color: '#64748b' }}>套用到：</span>
             <select

@@ -47,6 +47,45 @@ _PROFILES_FILENAME = "profiles.json"
 ALLOWED_AUDIO_EXTS = {".wav", ".webm", ".mp4", ".m4a", ".ogg", ".mp3"}
 
 
+def _looks_like_asr_hallucination(text: str) -> bool:
+    """
+    偵測 Whisper 系列模型（faster_whisper / breeze）對過短、過安靜或雜訊
+    音訊常見的「重複幻覺」輸出，例如「我我我我我喔我喔喔喔喔...」。
+
+    修過的真實問題：使用者實測回報聲音克隆出來的語音聽起來像是一直在
+    重複少數幾個字。追查後發現不是 CosyVoice 2 本身或 PyAV 解碼的問題
+    （已用合成 webm/opus 測試檔驗證 PyAV 解碼結果跟 ffmpeg 逐 sample
+    完全一致），而是自動轉錄（_auto_transcribe）產生的 reference_text
+    本身就是 Whisper 對短/安靜參考音訊的典型幻覺輸出——這段文字會被當成
+    CosyVoice 2 zero-shot 克隆的 prompt_text，跟實際參考音訊內容對不上，
+    導致模型的語音對齊機制錯亂，合成出來的任意文字都會被拖進這種重複
+    音節的模式。這裡用簡單的「字元/bigram 重複比例」偵測，抓到疑似幻覺
+    就當作轉錄失敗（回傳空字串），讓上層改用官方預設音色（音訊與逐字稿
+    保證對得上），而不是把幻覺文字餵給克隆推理。
+    """
+    stripped = "".join(text.split())
+    if len(stripped) < 6:
+        return False
+
+    # 1) 單一字元佔比過高（例如「我我我我我喔我喔喔喔喔」幾乎全是「我」「喔」）
+    from collections import Counter
+
+    counts = Counter(stripped)
+    most_common_count = counts.most_common(1)[0][1]
+    if most_common_count / len(stripped) > 0.5:
+        return True
+
+    # 2) 重複的 2-gram 佔比過高（涵蓋「我喔我喔我喔」這種雙字輪替的幻覺）
+    bigrams = [stripped[i : i + 2] for i in range(len(stripped) - 1)]
+    if bigrams:
+        bigram_counts = Counter(bigrams)
+        most_common_bigram_count = bigram_counts.most_common(1)[0][1]
+        if most_common_bigram_count / len(bigrams) > 0.4:
+            return True
+
+    return False
+
+
 class VoiceProfileService:
     """管理使用者上傳音訊 → 建立聲音克隆 profile 的檔案式儲存。"""
 
@@ -121,7 +160,15 @@ class VoiceProfileService:
                 stt_service = get_stt_service()
             audio_bytes = sample_path.read_bytes()
             result = await stt_service.transcribe(audio_bytes)
-            return result.text
+            text = result.text
+            if _looks_like_asr_hallucination(text):
+                logger.warning(
+                    "自動轉錄結果疑似 ASR 幻覺輸出（重複字元/字詞過高，可能是參考音訊"
+                    "過短或過安靜）：%r，reference_text 留空以避免污染 zero-shot 克隆",
+                    text[:60],
+                )
+                return ""
+            return text
         except Exception as exc:  # noqa: BLE001 — 自動轉錄失敗不應該讓建立 profile 整個失敗
             logger.warning("自動轉錄參考音訊逐字稿失敗（%s），reference_text 留空", exc)
             return ""
@@ -136,6 +183,35 @@ class VoiceProfileService:
     def list_profiles(self) -> list[VoiceProfile]:
         profiles = self._load_all()
         return [VoiceProfile(**data) for data in profiles.values()]
+
+    def update_profile(
+        self,
+        profile_id: str,
+        reference_text: Optional[str] = None,
+        label: Optional[str] = None,
+    ) -> Optional[VoiceProfile]:
+        """
+        修正既有 profile 的逐字稿（reference_text）／顯示名稱，不需重新上傳音檔。
+
+        存在的理由：自動轉錄（STT）可能失敗或產生幻覺文字（見
+        `_looks_like_asr_hallucination`），既有偵測只能擋掉「明顯」的重複幻覺，
+        品質不夠好但沒觸發偵測門檻的轉錄結果仍可能讓 zero-shot 克隆效果變差。
+        讓使用者能直接在前端看到目前的逐字稿並手動修正成音訊實際內容，
+        是比「重錄一次賭運氣」更直接的修復方式。
+        """
+        profiles = self._load_all()
+        data = profiles.get(profile_id)
+        if data is None:
+            return None
+
+        if reference_text is not None:
+            data["reference_text"] = reference_text
+        if label is not None and label:
+            data["label"] = label
+
+        profiles[profile_id] = data
+        self._save_all(profiles)
+        return VoiceProfile(**data)
 
     def delete_profile(self, profile_id: str) -> bool:
         profiles = self._load_all()

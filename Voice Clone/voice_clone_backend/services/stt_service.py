@@ -51,9 +51,20 @@ def decode_audio_bytes_to_mono_float32(audio_bytes: bytes):
     """
     把任意格式的音訊 bytes 解成 mono float32 numpy array（給 faster-whisper 用）。
 
-    先用 soundfile 嘗試（涵蓋 WAV/FLAC/OGG 等，且不需要 ffmpeg），失敗的話
-    （最常見情境：瀏覽器 MediaRecorder 錄出來的是 webm/opus 容器，soundfile
-    的底層 libsndfile 不支援），改用 pydub（需系統安裝 ffmpeg）轉檔後再讀取。
+    先用 soundfile 嘗試（涵蓋 WAV/FLAC/OGG 等，且不需要外部程式），失敗的話
+    （常見情境：瀏覽器 MediaRecorder 錄出來的 webm/opus，或使用者上傳的
+    m4a/mp4/mp3，soundfile 底層 libsndfile 不支援這些容器），改用 PyAV 解碼。
+
+    修過的真實問題：一開始改用 pydub + 系統 ffmpeg，但 Windows 正式機常常
+    沒把 ffmpeg 加進 PATH；後來改成 pydub + imageio-ffmpeg 內附執行檔，結果
+    還是失敗——因為 pydub 在轉檔前會先呼叫 mediainfo_json() 探測音訊資訊，
+    這一步是「另外」透過 pydub.utils.get_prober_name() 找系統 PATH 上的
+    ffprobe/avprobe，完全不理會 AudioSegment.converter/ffmpeg 這些可覆寫的
+    class 屬性，所以指定 imageio-ffmpeg 執行檔路徑也沒用，一樣是
+    「WinError 2 系統找不到指定的檔案」。改用 PyAV（`av` 套件）後不再需要
+    任何外部 ffmpeg/ffprobe 執行檔或 PATH 設定——PyAV 是直接連結 ffmpeg
+    共用函式庫（libavformat/libavcodec）的 Python binding，wheel 內已經
+    附帶對應平台的函式庫。
 
     若兩者皆失敗，會拋出例外（呼叫端負責決定要不要吞掉這個錯誤，例如
     voice_profile_service.py 的自動轉錄失敗時只會讓 reference_text 留空，
@@ -68,18 +79,45 @@ def decode_audio_bytes_to_mono_float32(audio_bytes: bytes):
 
         audio_np, _sr = sf.read(io.BytesIO(audio_bytes), dtype="float32")
     except Exception as exc:  # noqa: BLE001 — soundfile 對非其支援格式會直接拋例外
-        logger.info("soundfile 無法解析音訊（%s），改用 pydub/ffmpeg 轉檔", exc)
-        from pydub import AudioSegment
-
-        segment = AudioSegment.from_file(io.BytesIO(audio_bytes))
-        segment = segment.set_frame_rate(16000).set_channels(1)
-        samples = np.array(segment.get_array_of_samples()).astype(np.float32)
-        max_val = float(1 << (8 * segment.sample_width - 1))
-        audio_np = samples / max_val
+        logger.info("soundfile 無法解析音訊（%s），改用 PyAV 解碼", exc)
+        audio_np = _decode_with_pyav(audio_bytes)
 
     if audio_np.ndim > 1:
         audio_np = audio_np.mean(axis=1)
     return audio_np.astype(np.float32)
+
+
+def _decode_with_pyav(audio_bytes: bytes, target_sample_rate: int = 16000):
+    """用 PyAV 把任意容器格式（webm/opus、m4a、mp3…）解成 mono float32 numpy array。
+
+    不依賴系統安裝的 ffmpeg/ffprobe 執行檔或 PATH 設定（見上方
+    decode_audio_bytes_to_mono_float32 docstring 的說明）。
+    """
+    import io
+
+    import av
+    import numpy as np
+
+    container = av.open(io.BytesIO(audio_bytes))
+    try:
+        stream = container.streams.audio[0]
+        resampler = av.AudioResampler(format="s16", layout="mono", rate=target_sample_rate)
+
+        chunks = []
+        for frame in container.decode(stream):
+            for resampled in resampler.resample(frame):
+                chunks.append(resampled.to_ndarray())
+        # resampler 內部可能還緩衝著最後一小段，flush 一次拿出來
+        for resampled in resampler.resample(None):
+            chunks.append(resampled.to_ndarray())
+    finally:
+        container.close()
+
+    if not chunks:
+        raise RuntimeError("PyAV 未能從音訊中解出任何 frame（檔案可能是空的或已損毀）")
+
+    pcm_int16 = np.concatenate(chunks, axis=1).reshape(-1)
+    return (pcm_int16.astype(np.float32) / 32768.0)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -253,6 +291,42 @@ class STTService:
         self._fallback_timeout_s = (
             fallback_timeout_ms or settings.stt_fallback_timeout_ms
         ) / 1000.0
+
+    @property
+    def primary_engine(self) -> STTEngine:
+        return self._primary
+
+    @property
+    def fallback_engine(self) -> STTEngine:
+        return self._fallback
+
+    async def warmup(self) -> None:
+        """伺服器啟動時預先載入 primary / fallback 權重，避免第一個真實請求才觸發延遲載入。
+
+        修過的真實問題：primary 逾時保護（STT_PRIMARY_TIMEOUT_MS，預設僅
+        1500ms）量的是「一次 transcribe 呼叫」的時間，但引擎第一次被呼叫時
+        還包含權重載入（甚至下載）——對 faster-whisper large-v3 這種大模型
+        來說遠超過 1500ms。結果是正式環境的第一次請求 primary 必定被誤判
+        逾時、改跑 fallback，而 fallback 若跟 primary 同引擎（見 config.py
+        「dev 環境預設兩者都是 faster-whisper」的說明），又要重新載入一次，
+        使用者要多等一輪。啟動時就在背景執行緒把兩個引擎都載入好，之後
+        逾時保護量到的才是真正的推理延遲。任何一個引擎預先載入失敗都只記
+        警告，不阻擋伺服器啟動（仍會在第一次請求時照舊延遲載入重試）。
+        """
+        loop = asyncio.get_event_loop()
+        for engine, label in ((self._primary, "primary"), (self._fallback, "fallback")):
+            load_fn = getattr(engine, "_load", None)
+            if load_fn is None:
+                continue
+            try:
+                await loop.run_in_executor(None, load_fn)
+                logger.info("STT %s 引擎（%s）已預先載入完成", label, engine.name.value)
+            except Exception:
+                logger.exception(
+                    "STT %s 引擎（%s）預先載入失敗，仍會在第一次請求時延遲載入重試",
+                    label,
+                    engine.name.value,
+                )
 
     async def transcribe(self, audio_bytes: bytes, language: str = "zh") -> STTResult:
         start = time.perf_counter()

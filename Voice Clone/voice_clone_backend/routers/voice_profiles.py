@@ -42,6 +42,13 @@ class CloneRequest(BaseModel):
     )
 
 
+class UpdateProfileRequest(BaseModel):
+    reference_text: str | None = Field(
+        None, description="修正後的參考音訊逐字稿（例如自動轉錄結果有誤/幻覺時手動修正）"
+    )
+    label: str | None = Field(None, description="修正後的顯示名稱")
+
+
 @router.post("/upload-sample", summary="上傳聲音克隆用的錄音樣本")
 async def upload_sample(file: UploadFile = File(..., description="WAV/WebM 等音訊檔")):
     settings = get_settings()
@@ -84,6 +91,16 @@ async def clone_voice_profile(req: CloneRequest):
 @router.get("", response_model=list[VoiceProfile], summary="列出所有聲音克隆 Profile")
 async def list_voice_profiles():
     return get_voice_profile_service().list_profiles()
+
+
+@router.patch("/{profile_id}", response_model=VoiceProfile, summary="修正聲音克隆 Profile 的逐字稿/名稱")
+async def update_voice_profile(profile_id: str, req: UpdateProfileRequest):
+    updated = get_voice_profile_service().update_profile(
+        profile_id, reference_text=req.reference_text, label=req.label
+    )
+    if updated is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="找不到該 profile")
+    return updated
 
 
 @router.delete("/{profile_id}", summary="刪除聲音克隆 Profile")

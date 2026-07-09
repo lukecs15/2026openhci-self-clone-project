@@ -38,6 +38,14 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
+# 修過的真實問題：這裡原本用 allow_origins 寫死某一次 cloudflared quick
+# tunnel 產生的隨機網址（https://holidays-kick-execute-halloween.trycloudflare.com）。
+# Cloudflare quick tunnel 每次重啟都會換一個全新的隨機子網域，寫死單一網址
+# 等於每次重開 tunnel 都要記得回來改這裡，忘記改的話前端（走另一個 tunnel
+# 網址開啟）打 REST API（/api/...）會直接被瀏覽器的 CORS 檔掉。改用
+# allow_origin_regex 讓任何 *.trycloudflare.com 子網域都能通過，不用每次
+# 手動更新（注意：WebSocket 端點 /ws/... 本來就不受 CORSMiddleware 管轄，
+# 這裡只影響 REST API）。
 app.add_middleware(
     CORSMiddleware,
     # 手機 onboarding 前端（mobile_frontend_origin）跟主系統展示端
@@ -57,6 +65,24 @@ app.include_router(voice_profiles.router, prefix="/api")
 app.include_router(onboarding.router, prefix="/api")
 app.include_router(ws_voice_agents.router)
 app.include_router(ws_debate.router)
+
+
+@app.on_event("startup")
+async def _warmup_stt_engines() -> None:
+    """伺服器啟動時預先載入 STT 引擎權重（見 STTService.warmup() docstring 的說明）。
+
+    修過的真實問題：沒有這個 warmup 時，STT 權重要等使用者第一次上傳聲音
+    樣本 / 開口說話才會觸發延遲載入，載入時間（尤其 faster-whisper
+    large-v3）常常遠超過 STT_PRIMARY_TIMEOUT_MS，導致第一次請求必定誤判
+    primary 逾時、改跑 fallback，fallback 又要重新載入一次，使用者要多等
+    一輪，log 也很難懂。
+    """
+    from services.stt_service import get_stt_service
+
+    try:
+        await get_stt_service().warmup()
+    except Exception:
+        logger.exception("STT 引擎預先載入失敗，仍會在第一次請求時延遲載入重試")
 
 
 @app.get("/health", tags=["Health"])

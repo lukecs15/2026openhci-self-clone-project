@@ -118,7 +118,7 @@ async def test_fallback_exception_after_primary_failure_raises_clear_error():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# decode_audio_bytes_to_mono_float32：音訊解碼（webm/opus fallback 到 pydub/ffmpeg）
+# decode_audio_bytes_to_mono_float32：音訊解碼（webm/opus、m4a 等 fallback 到 PyAV）
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _make_wav_bytes(duration_s: float = 0.5, sample_rate: int = 16000) -> bytes:
@@ -143,23 +143,44 @@ def test_decode_audio_bytes_handles_wav_via_soundfile():
     assert len(audio_np) > 0
 
 
-def test_decode_audio_bytes_falls_back_to_pydub_for_non_wav_container():
+def _make_aac_adts_bytes(duration_s: float = 0.3, sample_rate: int = 16000) -> bytes:
+    """用 PyAV 產生一段 AAC/ADTS 音訊（m4a 常見的音訊編碼），純 Python 不需要
+    系統安裝 ffmpeg——libsndfile（soundfile 的底層）不支援 AAC，剛好用來
+    測試「soundfile 解析失敗 → 改用 PyAV」這條 fallback 路徑，且跟真實回報
+    過的情境一致（使用者上傳 .m4a 樣本失敗）。
     """
-    模擬瀏覽器 MediaRecorder 輸出的情境：soundfile 無法解析的容器格式
-    （這裡用 ogg 當代表），應該自動改用 pydub/ffmpeg 轉檔後成功解碼。
-    """
-    pydub = pytest.importorskip("pydub")
-    from pydub import AudioSegment
-    from pydub.generators import Sine
-
-    segment = Sine(440).to_audio_segment(duration=300).set_frame_rate(16000).set_channels(1)
     import io
 
-    buf = io.BytesIO()
-    segment.export(buf, format="ogg")
-    ogg_bytes = buf.getvalue()
+    import av
+    import numpy as np
 
-    audio_np = decode_audio_bytes_to_mono_float32(ogg_bytes)
+    t = np.linspace(0, duration_s, int(sample_rate * duration_s), endpoint=False)
+    tone = (0.1 * np.sin(2 * np.pi * 440 * t) * 32767).astype(np.int16)
+
+    buf = io.BytesIO()
+    container = av.open(buf, mode="w", format="adts")
+    stream = container.add_stream("aac", rate=sample_rate)
+    frame = av.AudioFrame.from_ndarray(tone.reshape(1, -1), format="s16", layout="mono")
+    frame.sample_rate = sample_rate
+    for packet in stream.encode(frame):
+        container.mux(packet)
+    for packet in stream.encode(None):
+        container.mux(packet)
+    container.close()
+    return buf.getvalue()
+
+
+def test_decode_audio_bytes_falls_back_to_pyav_for_non_wav_container():
+    """
+    模擬瀏覽器 MediaRecorder / 使用者上傳 m4a 的情境：soundfile 無法解析的
+    容器格式（這裡用 AAC/ADTS 當代表，libsndfile 不支援 AAC），應該自動
+    改用 PyAV 解碼成功（見 decode_audio_bytes_to_mono_float32 docstring
+    說明過去 pydub + 系統/imageio-ffmpeg 都無法可靠解決這個問題的原因）。
+    """
+    pytest.importorskip("av")
+
+    aac_bytes = _make_aac_adts_bytes()
+    audio_np = decode_audio_bytes_to_mono_float32(aac_bytes)
 
     assert audio_np.dtype.name == "float32"
     assert len(audio_np) > 0

@@ -17,16 +17,34 @@
 #   1) pip install torch>=2.7.0 torchvision torchaudio \
 #        --index-url https://download.pytorch.org/whl/cu128
 #   2) pip install -r requirements/base.txt
-#   3) pip install -r requirements/prod-rtx5090.txt
-#   4) 依 CosyVoice 2 官方 repo 指示安裝（含 Matcha-TTS 依賴），
-#      並將權重放到 COSYVOICE_MODEL_PATH 指定路徑
-#      https://github.com/FunAudioLLM/CosyVoice
+#   3) 【修過的真實問題】openai-whisper==20231117（下面精確釘這個版本，
+#      對齊官方 CosyVoice/requirements.txt）用的是舊式 setup.py，build
+#      階段會直接 `import pkg_resources`；新版 setuptools（71+/81+）在
+#      pip 預設的隔離建置環境（build isolation）裡已經不含 pkg_resources，
+#      導致 `ModuleNotFoundError: No module named 'pkg_resources'`、
+#      整個 pip install 失敗。先在「主環境」裝一個仍含 pkg_resources 的
+#      setuptools，再用 --no-build-isolation 讓 openai-whisper 直接借用
+#      主環境的 setuptools，跳過會重建隔離環境的預設行為：
+#        pip install "setuptools<81" wheel
+#        pip install --no-build-isolation -r requirements/prod-rtx5090.txt
+#      （若仍失敗，也可以退而求其次把下面 openai-whisper==20231117 這行
+#      放寬回 openai-whisper>=20231117，讓 pip 選一個有正常打包、不吃這個
+#      問題的較新版本——whisper.log_mel_spectrogram() 這個 CosyVoice 唯一
+#      用到的函式在各版本間介面沒變過，放寬版本對合成品質沒有影響。）
+#   4) CosyVoice 2 原始碼與 Matcha-TTS 子模組已經 vendor 在
+#      voice_clone_backend/CosyVoice（含 third_party/Matcha-TTS），
+#      不需要再另外 clone；services/tts_service.py 會自動把這兩個路徑
+#      加進 sys.path。權重放在 COSYVOICE_MODEL_PATH 指定路徑（已放好，
+#      見 pretrained_models/CosyVoice2-0.5B）。
+#      官方 repo 參考：https://github.com/FunAudioLLM/CosyVoice
 #
 # .env 建議設定：
 #   DEVICE_PROFILE=prod
 #   TORCH_DEVICE=cuda
 #   TORCH_DTYPE=bfloat16     # Blackwell 對 bfloat16 有原生加速
-#   STT_PRIMARY_ENGINE=breeze
+#   STT_PRIMARY_ENGINE=faster_whisper   # Breeze ASR 尚未整合實際推理程式碼
+#                                       # （見 services/stt_service.py 的 TODO），
+#                                       # 待安裝 funasr 並補上推理邏輯後再切換成 breeze
 #   STT_FALLBACK_ENGINE=faster_whisper
 #   WHISPER_MODEL=large-v3
 #   BREEZE_ASR_ENABLED=true
@@ -36,21 +54,97 @@
 -r base.txt
 
 # STT 主引擎：Breeze ASR（MediaTek Research）
+# 目前僅預留依賴安裝，實際推理程式碼待整合（見 services/stt_service.py
+# 的 BreezeASREngine._run_inference TODO）；在補上之前 .env 請維持
+# STT_PRIMARY_ENGINE=faster_whisper，否則會直接 NotImplementedError。
 funasr>=1.1.0
 modelscope>=1.15.0
 
 # STT 備援：faster-whisper（large-v3 在 5090 上遠超即時速度）
 faster-whisper>=1.0.0
 
-# TTS：CosyVoice 2 相關依賴（實際權重與 repo 需另行取得，見上方安裝順序）
-# CosyVoice 2 官方需求：見 https://github.com/FunAudioLLM/CosyVoice/requirements.txt
-onnxruntime-gpu>=1.20.0
+# ── TTS：CosyVoice 2 推理所需依賴 ──────────────────────────────
+# 對照 vendor 進來的 voice_clone_backend/CosyVoice/requirements.txt，
+# 這裡只列「CLI 推理路徑」（cosyvoice.cli.cosyvoice）實際會 import 到的套件，
+# 略過只有訓練 / webui / TensorRT-serving 才需要的重依賴
+# （deepspeed、gradio、tensorrt、grpcio 等）。
+#
+# 版本策略（修過的真實問題）：使用者實測回報 CosyVoice 2 zero-shot 合成出來
+# 的語音會不斷重複少數幾個音節（像是卡在同一個 token 一直重複），懷疑是
+# 套件版本跟官方 requirements.txt（voice_clone_backend/CosyVoice/requirements.txt）
+# 沒對齊。追查後發現：
+#   - 官方版本是 torch==2.3.1 / torchaudio==2.3.1 / onnxruntime-gpu==1.18.0 /
+#     numpy==1.26.4 / transformers==4.51.3（都是精確版本，不是下限）。
+#   - RTX 5090（Blackwell, sm_120）硬體本身要求 torch>=2.7.0 + cu128 才有
+#     對應的 CUDA kernel，torch==2.3.1 在這張卡上无法初始化 CUDA，這個差異
+#     無法避免、只能保留 torch/torchaudio 用 >=2.7.0。
+#   - 但先前這裡所有其他套件都只寫「下限」（transformers>=4.51.3 等），
+#     沒有精確對齊官方版本，pip 實際上會裝到當下最新版。這是真正的風險
+#     所在：cosyvoice/llm/llm.py 的 Qwen2Encoder.forward_one_step() 是直接
+#     手動呼叫 transformers 的 Qwen2ForCausalLM(..., use_cache=True,
+#     past_key_values=cache)，繞過官方 generate()、自己管理 KV cache，
+#     屬於相依 transformers 內部 cache 實作細節的低階整合。transformers
+#     從 4.51.3 之後的版本多次調整過 KV cache 的預設實作（DynamicCache /
+#     attention backend 預設值等），版本落差太大時很可能不會直接噴錯，
+#     而是讓这段手動 KV cache 整合「跑起來但語意不對」——這正好可以解釋
+#     「合成沒有 raise 任何例外、也真的吐出音訊，但内容却是重複音節」這種
+#     悄悄跑歪的症狀。因此把 transformers / onnxruntime-gpu / numpy 精確
+#     釘在官方版本，只有 torch / torchaudio 因為硬體限制才放寬。
+torch>=2.7.0
+torchaudio>=2.7.0
+# 【修過的真實問題】官方 requirements.txt 對 onnxruntime 是分平台精確指定的：
+#   onnxruntime-gpu==1.18.0; sys_platform == 'linux'
+#   onnxruntime==1.18.0    ; sys_platform == 'darwin' or sys_platform == 'win32'
+# 也就是說官方自己在 Windows 上「從來沒有」用過 onnxruntime-gpu，而是用純
+# CPU 版的 onnxruntime。這裡先前誤裝了 onnxruntime-gpu==1.18.0（照抄 Linux
+# 版本），使用者實測回報這個版本的 CUDAExecutionProvider 在 Windows 上
+# LoadLibrary 失敗（onnxruntime_providers_cuda.dll 依賴的 CUDA/cuDNN DLL
+# 版本對不上這台機器實際裝的 CUDA 12.8），而且環境裡同時存在 onnxruntime
+# 與 onnxruntime-gpu 兩個套件——兩者共用同一個 `onnxruntime` Python
+# import 命名空間，同時安裝是已知會互相覆蓋/衝突原生 DLL 的錯誤組合。
+# campplus.onnx（speaker embedding）與 speech_tokenizer_v2.onnx（zero-shot
+# 克隆用的語意 token 抽取）都吃這個 session，一旦底層 DLL 版本衝突，抽出
+# 來的 speech token／embedding 可能整批是錯的、但 onnxruntime 本身只是
+# 靜靜 fallback 到 CPU、不會 raise 例外——這是另一條可能導致「合成沒有
+# 报错、但内容却是重複音節」的路徑（reference 音訊的語意 token 錯了，
+# 等同給 LLM 一組跟真正參考音訊對不上的 prompt condition）。
+# campplus.onnx／speech_tokenizer_v2.onnx 都只在每次 zero-shot 請求時對
+# 「參考音訊」跑一次（不是每個 token 都要跑），CPU 執行時間可忽略，改用
+# CPU 版完全不影響效能，且跟官方 Windows 測試環境完全一致。
+onnxruntime==1.18.0; sys_platform == "darwin" or sys_platform == "win32"
+onnxruntime-gpu==1.18.0; sys_platform == "linux"
+numpy==1.26.4
+hyperpyyaml==1.2.3
+inflect==7.3.1
+librosa==0.10.2
+openai-whisper==20231117
+x-transformers==2.11.24
+conformer==0.3.2
+diffusers==0.29.0
+omegaconf==2.3.0
+einops
+scipy
+regex
+tiktoken
+tqdm
+transformers==4.51.3
+gdown==5.1.0
+
+# vendor 進來的 third_party/Matcha-TTS 子模組本身的 matcha/utils/__init__.py
+# 在「package 載入時」就無條件 import 訓練用工具（instantiate_callbacks 等），
+# 即使我們的推理路徑只用得到 matcha.utils.pylogger 這一個函式，也一樣會被
+# 拖進來、非裝不可，否則直接 ModuleNotFoundError。已實測補齊以下 5 個套件
+# 後，from cosyvoice.cli.cosyvoice import CosyVoice2 才能完整 import 成功：
+lightning>=2.0.0
 hydra-core>=1.3.2
-conformer>=0.3.2
-diffusers>=0.27.0
-gdown>=5.1.0
+rich>=13.0.0
+matplotlib>=3.7.0
+wget>=3.2
 
 # 多 Agent 編排（Pipecat 原生多 Agent worker/bus 模型）
 pipecat-ai>=0.0.50
 # 若需跨 process/機器協調的進階多 Agent 擴充：
 # pipecat-ai-subagents
+
+pyarrow==18.1.0
+pyworld==0.3.4

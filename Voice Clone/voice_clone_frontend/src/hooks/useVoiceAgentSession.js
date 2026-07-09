@@ -83,8 +83,9 @@ import { createSendQueue } from '../utils/sendQueue'
 import { isBrowserTtsSupported, speakWithBrowserTts } from '../utils/browserTts'
 import { createBrowserSttSession, isBrowserSttSupported } from '../utils/browserStt'
 import { waitForPlaybackToSettle } from '../utils/agentSpeakingSync'
+import { resolveWsBaseUrl } from '../utils/resolveWsBaseUrl'
 
-const WS_BASE = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8200'
+const WS_BASE = resolveWsBaseUrl(import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8200')
 
 export function useVoiceAgentSession(sessionId) {
   const [state, dispatch] = useReducer(agentSessionReducer, initialSessionState)
@@ -151,48 +152,47 @@ export function useVoiceAgentSession(sessionId) {
     return audioContextRef.current
   }, [])
 
+  /**
+   * 修過的真實問題：後端送來的是「裸」16-bit PCM（沒有 WAV/容器格式的
+   * header，見 services/tts_service.py 的 _tts_speech_to_pcm16_bytes()），
+   * 但這裡以前直接丟給 ctx.decodeAudioData()——這個 API 只能解析完整封裝
+   * 過的音訊檔（WAV/MP3/OGG...），碰到裸 PCM 一定會走 error callback；而
+   * error callback 當初寫成靜默 resolve()（是為了跳過 MockTTSService 產生
+   * 的靜音假資料，不讓播放佇列卡住），結果變成「不管真的合成成功還是
+   * 失敗，一律靜默跳過、完全沒有聲音」，只有事件時序是對的。改成手動用
+   * Int16 樣本建立 AudioBuffer，並用後端隨 chunk 一起送來的 sampleRate
+   * （而不是猜測或寫死），確保播放速度/音高正確。
+   */
   const enqueueAudioForAgent = useCallback(
-    async (agentId, base64Audio) => {
+    async (agentId, base64Audio, sampleRate = 24000) => {
       if (!base64Audio) return
       const ctx = getAudioContext()
       const binary = atob(base64Audio)
       const bytes = new Uint8Array(binary.length)
       for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
 
-      // 見 enqueueSpeechForAgent 的同樣理由：捕捉當下 epoch，執行到這個
-      // chunk 時如果 epoch 已經對不上（結束對話期間被作廢），直接跳過。
-      const epoch = playbackEpochRef.current
+      const sampleCount = Math.floor(bytes.length / 2)
+      if (sampleCount === 0) return
+
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+      const floatData = new Float32Array(sampleCount)
+      for (let i = 0; i < sampleCount; i += 1) {
+        floatData[i] = view.getInt16(i * 2, true) / 32768
+      }
+
       if (!playQueuesRef.current[agentId]) {
         playQueuesRef.current[agentId] = Promise.resolve()
       }
       playQueuesRef.current[agentId] = playQueuesRef.current[agentId].then(
         () =>
           new Promise((resolve) => {
-            if (playbackEpochRef.current !== epoch) {
-              resolve()
-              return
-            }
-            ctx.decodeAudioData(
-              bytes.buffer.slice(0),
-              (buffer) => {
-                if (playbackEpochRef.current !== epoch) {
-                  resolve()
-                  return
-                }
-                const source = ctx.createBufferSource()
-                source.buffer = buffer
-                source.connect(ctx.destination)
-                source.onended = () => {
-                  if (activeSourcesRef.current[agentId] === source) {
-                    delete activeSourcesRef.current[agentId]
-                  }
-                  resolve()
-                }
-                activeSourcesRef.current[agentId] = source
-                source.start()
-              },
-              () => resolve(), // 解碼失敗（例如 mock 靜音資料）就跳過，不中斷佇列
-            )
+            const buffer = ctx.createBuffer(1, sampleCount, sampleRate)
+            buffer.copyToChannel(floatData, 0)
+            const source = ctx.createBufferSource()
+            source.buffer = buffer
+            source.connect(ctx.destination)
+            source.onended = resolve
+            source.start()
           }),
       )
     },
@@ -282,7 +282,7 @@ export function useVoiceAgentSession(sessionId) {
       // 新的聲音。
       if (sessionEndedRef.current) return
       if (payload.type === 'agent_speaking_chunk' && payload.audio) {
-        enqueueAudioForAgent(payload.agent_id, payload.audio)
+        enqueueAudioForAgent(payload.agent_id, payload.audio, payload.sample_rate)
       }
       // text 只會出現在該句的第一個 chunk（見後端 _synthesize_and_wrap 的修正），
       // 所以這裡不會把同一句話唸兩次；瀏覽器 TTS 開關開著時才會唸。

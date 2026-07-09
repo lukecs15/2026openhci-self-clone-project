@@ -105,8 +105,9 @@ import {
 import { createSendQueue } from '../utils/sendQueue'
 import { isBrowserTtsSupported, speakWithBrowserTts } from '../utils/browserTts'
 import { createBrowserSttSession, isBrowserSttSupported } from '../utils/browserStt'
+import { resolveWsBaseUrl } from '../utils/resolveWsBaseUrl'
 
-const WS_BASE = import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8200'
+const WS_BASE = resolveWsBaseUrl(import.meta.env.VITE_WS_BASE_URL || 'ws://localhost:8200')
 
 export function useDebateSession(sessionId) {
   const [state, dispatch] = useReducer(debateSessionReducer, initialDebateState)
@@ -153,31 +154,50 @@ export function useDebateSession(sessionId) {
     return audioContextRef.current
   }, [])
 
-  /** 播放單一 chunk 的音訊，回傳「這段音訊真的播完（或被強制中斷/解碼失敗）」才 resolve 的 Promise。 */
+  /**
+   * 播放單一 chunk 的音訊，回傳「這段音訊真的播完（或被強制中斷）」才 resolve 的 Promise。
+   *
+   * 修過的真實問題：後端送來的是「裸」16-bit PCM（沒有 WAV/容器格式的
+   * header，見 services/tts_service.py 的 _tts_speech_to_pcm16_bytes()），
+   * 但這裡以前直接丟給 ctx.decodeAudioData()——這個 API 只能解析完整封裝
+   * 過的音訊檔（WAV/MP3/OGG...），碰到裸 PCM 一定會走 error callback；而
+   * error callback 當初寫成靜默 resolve()（是為了跳過 MockTTSService 產生
+   * 的靜音假資料，不讓管線卡住），結果變成「不管真的合成成功還是失敗，
+   * 一律靜默跳過、完全沒有聲音」，只有事件時序（文字出現的時機）是對的，
+   * 使用者實測回報過「時機正確但完全沒聽到聲音」正是這個原因。改成手動
+   * 用 Int16 樣本建立 AudioBuffer，不再依賴 decodeAudioData 的格式偵測，
+   * 並用後端隨 chunk 一起送來的 sampleRate（而不是猜測或寫死），確保
+   * 播放速度/音高正確。
+   */
   const playAudioChunk = useCallback(
-    (base64Audio) => {
+    (base64Audio, sampleRate = 24000) => {
       if (!base64Audio) return Promise.resolve()
       const ctx = getAudioContext()
       const binary = atob(base64Audio)
       const bytes = new Uint8Array(binary.length)
       for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
 
+      const sampleCount = Math.floor(bytes.length / 2)
+      if (sampleCount === 0) return Promise.resolve()
+
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+      const floatData = new Float32Array(sampleCount)
+      for (let i = 0; i < sampleCount; i += 1) {
+        floatData[i] = view.getInt16(i * 2, true) / 32768
+      }
+
       return new Promise((resolve) => {
-        ctx.decodeAudioData(
-          bytes.buffer.slice(0),
-          (buffer) => {
-            const source = ctx.createBufferSource()
-            source.buffer = buffer
-            source.connect(ctx.destination)
-            source.onended = () => {
-              if (playSourceRef.current === source) playSourceRef.current = null
-              resolve()
-            }
-            playSourceRef.current = source
-            source.start()
-          },
-          () => resolve(), // 解碼失敗（例如 mock 靜音資料）就跳過，不卡住管線
-        )
+        const buffer = ctx.createBuffer(1, sampleCount, sampleRate)
+        buffer.copyToChannel(floatData, 0)
+        const source = ctx.createBufferSource()
+        source.buffer = buffer
+        source.connect(ctx.destination)
+        source.onended = () => {
+          if (playSourceRef.current === source) playSourceRef.current = null
+          resolve()
+        }
+        playSourceRef.current = source
+        source.start()
       })
     },
     [getAudioContext],
@@ -273,7 +293,7 @@ export function useDebateSession(sessionId) {
           dispatch(payload)
           if (payload.type === 'agent_speaking_chunk') {
             const tasks = []
-            if (payload.audio) tasks.push(playAudioChunk(payload.audio))
+            if (payload.audio) tasks.push(playAudioChunk(payload.audio, payload.sample_rate))
             if (payload.text && browserTtsEnabledRef.current) {
               tasks.push(speakChunk(payload.agent_id, payload.text))
             }

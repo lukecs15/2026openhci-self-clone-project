@@ -254,18 +254,43 @@ class MultiAgentOrchestrator:
         音訊 chunk 附帶文字，之後的 chunk 文字留空，前端只在文字非空時才記一筆
         transcript（音訊仍然每個 chunk 都會照樣播放，不受影響）。
         """
+        # 修過的真實問題：TTS 合成失敗時（例如 CosyVoice 2 推理錯誤）以前
+        # 會整個 exception 往外傳，讓這句話（連同它的文字）完全不會產生
+        # 任何 agent_speaking_chunk 事件，前端 transcript 因此直接漏掉這
+        # 句話，使用者只會看到 agent 忽然沒講完就結束，看不出發生了什麼
+        # 事。現在改成：合成失敗時記錄清楚的錯誤 log，仍然吐出一個帶著
+        # 文字、audio_bytes 留空並標記 tts_error 的事件，讓文字至少正常
+        # 顯示（見 agents/debate.py 的 _synthesize_and_wrap 有相同修法，
+        # 該檔案額外還處理了節奏控制的部分）。
+        # 修過的另一個真實問題：這裡以前沒有帶 sample_rate 欄位（debate.py
+        # 的同名函式有帶），前端播放時就沒有依據可以正確設定 AudioBuffer
+        # 的取樣率，只能用寫死的預設值猜——真的接上 CosyVoice 2 之後兩邊
+        # 取樣率剛好都是 24000 才「湊巧」正確，其他情況會播放速度/音高跑掉。
         is_first_chunk_of_sentence = True
-        async for chunk in self.tts_service.synthesize(agent.agent_id, sentence, agent.voice_profile_id):
-            if chunk.is_final:
-                continue
+        try:
+            async for chunk in self.tts_service.synthesize(agent.agent_id, sentence, agent.voice_profile_id):
+                if chunk.is_final:
+                    continue
+                yield {
+                    "type": "agent_speaking_chunk",
+                    "agent_id": agent.agent_id,
+                    "text": sentence if is_first_chunk_of_sentence else "",
+                    "audio_bytes": chunk.audio_bytes,
+                    "sample_rate": chunk.sample_rate,
+                    "ttfb_ms": chunk.ttfb_ms,
+                }
+                is_first_chunk_of_sentence = False
+        except Exception as exc:  # noqa: BLE001
+            logger.error("TTS 合成失敗（agent=%s, sentence=%s）：%s", agent.agent_id, sentence[:30], exc)
             yield {
                 "type": "agent_speaking_chunk",
                 "agent_id": agent.agent_id,
                 "text": sentence if is_first_chunk_of_sentence else "",
-                "audio_bytes": chunk.audio_bytes,
-                "ttfb_ms": chunk.ttfb_ms,
+                "audio_bytes": b"",
+                "sample_rate": 24000,
+                "ttfb_ms": None,
+                "tts_error": str(exc),
             }
-            is_first_chunk_of_sentence = False
 
     def _build_messages(self, user_text: str) -> list[dict]:
         """
