@@ -45,12 +45,50 @@ STT/LLM/TTS 三者各自依 config.py 設定獨立決定要不要 mock：STT 一
 None 時交給該函式自己的 `routing_strategy or settings.agent_routing_strategy`
 邏輯去 fallback 用後端設定值，只有前端「明確指定」時才會覆蓋後端設定。
 
+── end_session 要能立刻中斷正在跑的生成（修過的真實回報問題：按下結束
+   對話要等所有 agent 的語音都生成完才會進總結頁面）───────────────────
+
+第一版寫法是最單純的「收到一則訊息才處理、處理完才收下一則」序列迴圈：
+`user_text`/`user_audio` 都是 `async for event in session.handle_user_text(...):
+await _send(...)` 這樣直接在主收訊迴圈裡「同步跑完」；這代表主迴圈會整個
+卡在這個 async for 裡，直到這一輪所有 agent 的完整回覆（LLM 串流 + TTS）
+都跑完才會再去 `await ws.receive_text()`。使用者實測回報：在語音生成到一半
+時按下「結束對話」，畫面並不會立刻跳到總結頁面，而是要等目前這輪所有
+agent 的語音都生成完才會進去——因為前端送出的 end_session 訊息只是靜靜
+躺在 WebSocket 的接收緩衝區裡，後端根本還沒空去讀它。
+
+跟辯論模式（routers/ws_debate.py）分析過的根因完全一樣，這裡採用同一套
+「背景 asyncio.Task + 隨時可以 cancel」的修法（辯論模式已經驗證有效，
+見該檔案開頭「架構差異」說明），但不需要辯論模式那套「持續自己講不停」
+的事件佇列/turn_ack 機制——這裡的「一輪」是由使用者的 user_text/user_audio
+觸發的一次性生成，不是背景無限迴圈，所以只需要：
+    - `current_turn_task`：目前這輪生成的背景 task（沒有生成中時是 None）。
+    - 收到 user_text/user_audio：直接 `asyncio.create_task()` 開一個背景
+      task 去跑 `session.handle_user_text()`/`handle_user_audio()` 並把
+      事件送給前端，主迴圈本身立刻回到 `await ws.receive_text()`，不會被
+      這一輪生成卡住，隨時能收到後續訊息（包含 end_session）。
+    - 收到 end_session：先 `cancel()` 掉 `current_turn_task`（如果還在跑）
+      並等它真的停下來，這一步會讓 CancelledError 沿著
+      `agents/orchestrator.py` 的 async generator 鏈往外傳，連
+      `_run_job_group()` 平行開出去的每個 agent 背景 task 也會一併被
+      cancel（見該檔案的說明），確保「中斷」是真的中斷運算，不是只有
+      前端不再收事件、後端其實還在背景繼續跑。task 真的停下來之後才呼叫
+      `session.generate_summary()` 並送出 `session_summary`，讓總結頁面
+      能立刻出現，不用等生成跑完。
+    - 正常情況（沒有按結束）：這一輪的背景 task 本來就會自然跑完，不需要
+      額外等待或呼叫 `_cancel_current_turn_task()`；只有在收到下一則
+      user_text/user_audio 或 end_session 時才需要確保「上一輪」已經
+      結束/被取消，避免兩輪同時跑、事件交錯送給前端（一般使用情境下不會
+      發生「上一輪還沒結束就送下一句」，這裡的取消只是保險，不是主要
+      使用路徑）。
+
 TODO: 加入心跳檢查（ping/pong），防止 WebSocket 超時斷線（可參考既有
       backend/routers/ws_conversation.py 的 _heartbeat() 實作）
 TODO: 支援串流音訊輸入（目前 user_audio 假設收到的是一段完整語音）
 TODO: 加入 VAD / turn-detection，取代目前「前端自行斷句再送出」的簡化作法
 """
 
+import asyncio
 import base64
 import json
 import logging
@@ -81,11 +119,49 @@ def _event_to_server_message(event: dict) -> dict:
     return out
 
 
+async def _run_turn(ws: WebSocket, session_id: str, event_source) -> None:
+    """
+    背景執行一輪生成（user_text/user_audio 觸發），把每個事件送給前端。
+    抽成獨立函式讓主迴圈可以用 asyncio.create_task() 丟到背景執行，不會
+    卡住 `await ws.receive_text()`（見檔案開頭「end_session 要能立刻中斷
+    正在跑的生成」說明）。
+
+    刻意不攔截 asyncio.CancelledError：end_session 取消這個 task 時，讓
+    取消訊號正常往外傳（跟 agents/debate.py 的取消哲學一致），不需要在
+    這裡做任何收尾——已經送出去的事件前端會照樣顯示，還沒送出去的部分
+    單純就不會再送，orchestrator 那邊也不會留下講到一半的 history 紀錄
+    （見 agents/orchestrator.py 的說明）。
+    """
+    try:
+        async for event in event_source:
+            await _send(ws, _event_to_server_message(event))
+    except asyncio.CancelledError:
+        logger.info("Session %s 目前這輪生成被中斷（使用者結束對話）", session_id)
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Session %s 這一輪生成發生未預期錯誤：%s", session_id, exc)
+        await _send(ws, {"type": "error", "message": str(exc)})
+
+
 @router.websocket("/ws/voice-agents/{session_id}")
 async def voice_agents_endpoint(ws: WebSocket, session_id: str):
     await ws.accept()
     session: Optional[ConversationSession] = None
     logger.info("WebSocket 連線建立：session_id=%s", session_id)
+
+    # 目前這一輪生成的背景 task（見檔案開頭「end_session 要能立刻中斷正在
+    # 跑的生成」說明），沒有生成中時是 None。
+    current_turn_task: Optional[asyncio.Task] = None
+
+    async def _cancel_current_turn_task() -> None:
+        nonlocal current_turn_task
+        if current_turn_task is not None and not current_turn_task.done():
+            current_turn_task.cancel()
+            try:
+                await current_turn_task
+            except asyncio.CancelledError:
+                pass
+        current_turn_task = None
 
     try:
         while True:
@@ -126,19 +202,29 @@ async def voice_agents_endpoint(ws: WebSocket, session_id: str):
                 if session is None or not msg.audio:
                     await _send(ws, {"type": "error", "message": "尚未 init_session 或缺少 audio"})
                     continue
+                # 保險起見：正常使用情境下不會「上一輪還沒結束就送下一句」，
+                # 這裡先確保沒有殘留的背景 task，避免萬一發生時兩輪事件交錯。
+                await _cancel_current_turn_task()
                 audio_bytes = base64.b64decode(msg.audio)
-                async for event in session.handle_user_audio(audio_bytes):
-                    await _send(ws, _event_to_server_message(event))
+                current_turn_task = asyncio.create_task(
+                    _run_turn(ws, session_id, session.handle_user_audio(audio_bytes))
+                )
 
             elif msg.type == "user_text":
                 if session is None or not msg.text:
                     await _send(ws, {"type": "error", "message": "尚未 init_session 或缺少 text"})
                     continue
-                async for event in session.handle_user_text(msg.text):
-                    await _send(ws, _event_to_server_message(event))
+                await _cancel_current_turn_task()
+                current_turn_task = asyncio.create_task(
+                    _run_turn(ws, session_id, session.handle_user_text(msg.text))
+                )
 
             elif msg.type == "end_session":
                 logger.info("Session 結束：session_id=%s", session_id)
+                # 先中斷目前這一輪生成（見檔案開頭說明），讓使用者不用等
+                # LLM/TTS 跑完才進總結頁面，也讓 orchestrator 平行開出去的
+                # 每個 agent 背景 task 一併真的停下來。
+                await _cancel_current_turn_task()
                 if session is not None:
                     try:
                         summary_text = await session.generate_summary()
@@ -152,3 +238,7 @@ async def voice_agents_endpoint(ws: WebSocket, session_id: str):
     except Exception as exc:  # noqa: BLE001
         logger.exception("WebSocket 處理發生未預期錯誤：%s", exc)
         await _send(ws, {"type": "error", "message": str(exc)})
+    finally:
+        # 連線意外斷開（非正常 end_session 流程）時，同樣要確保背景生成
+        # task 被清乾淨，不會留下孤兒 task 繼續在背景跑。
+        await _cancel_current_turn_task()

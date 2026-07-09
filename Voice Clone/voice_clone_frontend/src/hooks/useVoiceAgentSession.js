@@ -8,7 +8,9 @@
  * - 管理麥克風錄音（MediaRecorder，或瀏覽器 Web Speech API 辨識——見下方
  *   browserSttEnabled 說明）
  * - 串流播放各 agent 的 TTS 音訊 chunk（base64 → AudioContext 播放佇列，
- *   依 agent_id 分開排隊，避免不同 agent 的音訊互相打斷）
+ *   所有 agent 共用單一全域佇列、嚴格依事件抵達順序播放，避免 Job Group
+ *   平行模式下不同 agent 的音訊同時播放而聽起來像穿插/重疊說話——詳見
+ *   下方「多 Agent 音訊播放避免重疊」說明）
  *
  * 狀態轉換邏輯本身在 store/agentSessionReducer.js（純函式，已有 vitest 測試），
  * 這個 hook 只負責「接線」：WebSocket 事件 → dispatch → reducer 更新狀態。
@@ -29,18 +31,37 @@
  * 播放完才 dispatch，讓 AgentStage 的「發話中」高亮對齊使用者實際聽到的
  * 播放時間，而不是後端生成速度。
  *
- * 注意：瀏覽器 TTS 朗讀（speechQueueRef）用「單一全域佇列」而不是像音訊
- * 播放（playQueuesRef）那樣依 agent 分開排隊。原因是 window.speechSynthesis
- * 本身是整個分頁共用的單一朗讀引擎，同時排好幾個 agent 各自獨立的佇列會讓
- * 好幾個 .speak() 呼叫在差不多的時間點各自送進瀏覽器同一個底層佇列，實際
- * 播放順序會依呼叫時間點交錯，跟聊天視窗上乾淨的「小明→小華→阿德」順序
- * 對不起來（尤其 Job Group 平行模式，多個 agent 幾乎同時在生成文字）。
- * 改成單一全域佇列後，朗讀順序會跟 agent_speaking_chunk 事件抵達（也就是
- * 聊天紀錄顯示）的順序完全一致，不會有人聲交錯的問題；唯一的取捨是同一
- * 時間只會有一個 agent 的聲音在唸，不會真的「同時朗讀」——但 Web Speech
- * API 本來就無法真正同時朗讀多個聲音，這個取捨是必要的。真正的音訊播放
- * （playQueuesRef，未來接上 CosyVoice 2 時的真實/mock 音訊）不受影響，
- * 仍然是每個 agent 各自獨立播放，可以真的同時發聲。
+ * 注意：瀏覽器 TTS 朗讀（speechQueueRef）用「單一全域佇列」而不是依 agent
+ * 分開排隊。原因是 window.speechSynthesis 本身是整個分頁共用的單一朗讀
+ * 引擎，同時排好幾個 agent 各自獨立的佇列會讓好幾個 .speak() 呼叫在差不多
+ * 的時間點各自送進瀏覽器同一個底層佇列，實際播放順序會依呼叫時間點交錯，
+ * 跟聊天視窗上乾淨的「小明→小華→阿德」順序對不起來（尤其 Job Group 平行
+ * 模式，多個 agent 幾乎同時在生成文字）。改成單一全域佇列後，朗讀順序會
+ * 跟 agent_speaking_chunk 事件抵達（也就是聊天紀錄顯示）的順序完全一致，
+ * 不會有人聲交錯的問題。
+ *
+ * ── 多 Agent 音訊播放避免重疊（修過的真實回報問題）───────────────────
+ * 真正的音訊播放（playQueueRef，CosyVoice 生成的真實語音）原本跟朗讀佇列
+ * 走不同設計：依 agent_id 分開排隊（playQueuesRef，每個 agent 各自一條
+ * 佇列），理由是想讓 Job Group 平行模式下多個 agent「真的同時發聲」。
+ * 但實測發現這樣播放出來的結果是使用者同一時間聽到好幾個 agent 的聲音
+ * 疊在一起，完全無法分辨誰在說什麼，聽起來像是「穿插說話」——根本原因是
+ * 後端 agents/orchestrator.py 的 _run_job_group() 讓多個 agent 的 LLM+TTS
+ * 全部平行執行、事件依「誰先生成好」的完成順序合併吐出（agent 之間互不
+ * 等待），前端如果依 agent 分開排隊播放，等於是「誰的音訊先排進佇列就先
+ * 播」，多個 agent 幾乎同時排進各自佇列時，就會真的同時播放。
+ * 辯論模式（useDebateSession.js）沒有這個問題，因為後端本來就是輪流制、
+ * 同一時間只有一位 agent 在生成，前端只要嚴格依事件抵達順序用單一全域
+ * 佇列（eventPipelineRef）播放，天生就不會重疊。
+ * 修法：比照 useDebateSession.js 的作法，把音訊播放也改成單一全域佇列
+ * （playQueueRef），不再依 agent_id 分開排隊。不管是哪個 agent 的
+ * agent_speaking_chunk 先抵達，一律接在同一條佇列尾端，同一時間永遠只有
+ * 一段音訊在播放——用「輪流播放」取代「真的同時發聲」，換取聲音不重疊、
+ * 使用者聽得清楚每一句是誰講的。後端 Job Group 的平行運算（LLM/TTS 生成
+ * 速度）完全不受影響，仍然是平行跑，只有「音訊播放」這一步改成序列化；
+ * 文字訊息（dispatch(payload)）仍然在事件抵達當下就立刻顯示，不會被播放
+ * 佇列卡住，保留「好幾個 agent 幾乎同時在生成文字」這個 Job Group 原本的
+ * 即時感。
  *
  * ── 結束對話要立刻打斷正在播放的聲音（修過的真實回報問題）──────────────
  * 第一版 endSession() 只是送出 end_session 訊息，沒有做任何本地停止播放的
@@ -49,7 +70,7 @@
  * 沒有中途打斷的需求，所以完全沒有這一塊。新增結束按鈕之後，使用者實測
  * 發現按下「結束對話」時，如果剛好有 agent 正在講話，聲音會繼續播完，沒有
  * 立刻安靜下來。原因有兩個，都要處理：
- *   1. 本地已經排進 playQueuesRef／speechQueueRef 佇列、甚至正在播放的音訊
+ *   1. 本地已經排進 playQueueRef／speechQueueRef 佇列、甚至正在播放的音訊
  *      /瀏覽器朗讀，endSession() 完全沒有去停止它們。
  *   2. 後端 ws_voice_agents.py 的主收訊迴圈在處理 user_text 時是「同步跑完
  *      這一輪所有 agent 的完整回覆才會再去收下一則訊息」（不像辯論模式特地
@@ -58,11 +79,12 @@
  *      agent_speaking_chunk 事件如果前端沒有擋掉，一樣會被排進佇列播放。
  * 修法（跟 useDebateSession.js 的 stopAllPlaybackImmediately() 同樣思路，
  * 額外多一個「已結束」旗標處理第 2 點）：
- *   - stopAllPlaybackImmediately()：立刻 stop() 掉每個 agent 目前正在播放
- *     的 AudioBufferSourceNode（activeSourcesRef 記錄每個 agent「目前
- *     正在播放的那個」）、cancel() 瀏覽器朗讀、讓 playbackEpochRef 遞增，
- *     使佇列裡任何「還沒真的開始播放」的項目之後執行到時直接跳過（用法
- *     跟 useDebateSession.js 的 dispatchEpochRef 相同概念）。
+ *   - stopAllPlaybackImmediately()：立刻 stop() 掉目前正在播放的
+ *     AudioBufferSourceNode（activeSourceRef 記錄「目前正在播放的那個」，
+ *     見上方「多 Agent 音訊播放避免重疊」說明，改成單一全域佇列後同一時間
+ *     本來就只會有一個來源在播放）、cancel() 瀏覽器朗讀、讓 playbackEpochRef
+ *     遞增，使佇列裡任何「還沒真的開始播放」的項目之後執行到時直接跳過
+ *     （用法跟 useDebateSession.js 的 dispatchEpochRef 相同概念）。
  *   - sessionEndedRef：endSession() 呼叫時設成 true，之後（理論上因為
  *     第 2 點）陸續抵達的 agent_speaking_chunk 一律不再排進播放佇列——
  *     不只是「停掉現在在播的」，是「結束之後收到的新音訊也不要播」。
@@ -106,14 +128,17 @@ export function useVoiceAgentSession(sessionId) {
   const wsRef = useRef(null)
   const sendQueueRef = useRef(createSendQueue())
   const audioContextRef = useRef(null)
-  // 每個 agent 各自一條播放佇列，避免不同 agent 同時發話時音訊互相打斷
-  const playQueuesRef = useRef({})
-  // 瀏覽器 TTS 朗讀改用「單一全域佇列」，理由見檔案開頭說明（window.speechSynthesis
+  // 所有 agent 共用單一全域播放佇列，避免 Job Group 平行模式下不同 agent
+  // 的音訊同時播放而重疊——見檔案開頭「多 Agent 音訊播放避免重疊」說明。
+  const playQueueRef = useRef(Promise.resolve())
+  // 瀏覽器 TTS 朗讀同樣用「單一全域佇列」，理由見檔案開頭說明（window.speechSynthesis
   // 是整個分頁共用的單一引擎，分開排隊會導致跨 agent 播放順序交錯）。
   const speechQueueRef = useRef(Promise.resolve())
-  // 每個 agent「目前正在播放」的 AudioBufferSourceNode，結束對話時要能
-  // 直接 stop() 掉它們（見檔案開頭「結束對話要立刻打斷正在播放的聲音」說明）。
-  const activeSourcesRef = useRef({})
+  // 「目前正在播放」的 AudioBufferSourceNode，結束對話時要能直接 stop()
+  // 掉它（見檔案開頭「結束對話要立刻打斷正在播放的聲音」說明）。改成單一
+  // 全域佇列後，同一時間本來就只會有一個來源在播放，不再需要依 agent_id
+  // 分開記錄。
+  const activeSourceRef = useRef(null)
   // 結束對話時遞增，讓佇列裡還沒真的開始播放的音訊/朗讀之後執行到時直接
   // 跳過，不會在「結束」之後又冒出殘留的聲音。
   const playbackEpochRef = useRef(0)
@@ -164,7 +189,7 @@ export function useVoiceAgentSession(sessionId) {
    * （而不是猜測或寫死），確保播放速度/音高正確。
    */
   const enqueueAudioForAgent = useCallback(
-    async (agentId, base64Audio, sampleRate = 24000) => {
+    (agentId, base64Audio, sampleRate = 24000) => {
       if (!base64Audio) return
       const ctx = getAudioContext()
       const binary = atob(base64Audio)
@@ -180,18 +205,32 @@ export function useVoiceAgentSession(sessionId) {
         floatData[i] = view.getInt16(i * 2, true) / 32768
       }
 
-      if (!playQueuesRef.current[agentId]) {
-        playQueuesRef.current[agentId] = Promise.resolve()
-      }
-      playQueuesRef.current[agentId] = playQueuesRef.current[agentId].then(
+      // 不再依 agentId 分開排隊，一律接在同一條全域佇列尾端（見檔案開頭
+      // 「多 Agent 音訊播放避免重疊」說明），確保同一時間永遠只有一段音訊
+      // 在播放，不管是哪個 agent 的 chunk。
+      //
+      // 捕捉當下的 epoch：等這段音訊真的輪到要播的時候，如果使用者已經按
+      // 了結束對話（epoch 已經被 stopAllPlaybackImmediately() 遞增），就
+      // 直接跳過，不要在「結束」之後才冒出殘留的聲音（跟 enqueueSpeechForAgent
+      // 用同一套保護機制，也對應 useDebateSession.js 的 dispatchEpochRef）。
+      const epoch = playbackEpochRef.current
+      playQueueRef.current = playQueueRef.current.then(
         () =>
           new Promise((resolve) => {
+            if (playbackEpochRef.current !== epoch) {
+              resolve()
+              return
+            }
             const buffer = ctx.createBuffer(1, sampleCount, sampleRate)
             buffer.copyToChannel(floatData, 0)
             const source = ctx.createBufferSource()
             source.buffer = buffer
             source.connect(ctx.destination)
-            source.onended = resolve
+            source.onended = () => {
+              if (activeSourceRef.current === source) activeSourceRef.current = null
+              resolve()
+            }
+            activeSourceRef.current = source
             source.start()
           }),
       )
@@ -200,25 +239,26 @@ export function useVoiceAgentSession(sessionId) {
   )
 
   /**
-   * 立刻停掉所有 agent 目前正在播放的音訊、取消瀏覽器朗讀，並讓佇列裡還
-   * 沒真的開始播放的項目全部作廢——結束對話（endSession）時呼叫。跟
-   * useDebateSession.js 的同名函式思路相同，差別是這裡要同時處理「多個
-   * agent 各自的播放佇列」（辯論模式同一時間只有一位 agent 在講話，一般
-   * 多 Agent 對話的 Job Group 平行模式可能好幾個 agent 同時在播）。
+   * 立刻停掉目前正在播放的音訊、取消瀏覽器朗讀，並讓佇列裡還沒真的開始
+   * 播放的項目全部作廢——結束對話（endSession）時呼叫。跟
+   * useDebateSession.js 的同名函式思路相同：改成單一全域播放佇列之後
+   * （見檔案開頭「多 Agent 音訊播放避免重疊」說明），同一時間本來就只會
+   * 有一個來源在播放，不再需要像過去那樣逐一停掉「每個 agent 各自的」
+   * 播放來源。
    */
   const stopAllPlaybackImmediately = useCallback(() => {
     playbackEpochRef.current += 1
-    playQueuesRef.current = {}
+    playQueueRef.current = Promise.resolve()
     speechQueueRef.current = Promise.resolve()
 
-    Object.values(activeSourcesRef.current).forEach((source) => {
+    if (activeSourceRef.current) {
       try {
-        source.stop()
+        activeSourceRef.current.stop()
       } catch {
         // 音訊已經播完或已經停止時 stop() 可能丟例外，忽略即可
       }
-    })
-    activeSourcesRef.current = {}
+      activeSourceRef.current = null
+    }
 
     // window.speechSynthesis.cancel() 在部分瀏覽器不保證立即中斷，保險起見
     // 連續呼叫兩次（見 useDebateSession.js 的同一處理法說明）。
@@ -263,15 +303,17 @@ export function useVoiceAgentSession(sessionId) {
       }
 
       if (payload.type === 'agent_speaking_end') {
-        // 不立刻 dispatch：先等這個 agent 目前排進佇列的音訊／瀏覽器 TTS
+        // 不立刻 dispatch：先等目前排進全域播放佇列的音訊／瀏覽器 TTS
         // 朗讀都播完，才真的把「發話中」高亮收掉（見檔案開頭說明 +
         // utils/agentSpeakingSync.js）。此時該收的 agent_speaking_chunk
-        // 事件都已經處理完、佇列裡已經包含這一輪所有內容，直接讀取當下
-        // 的佇列 Promise 即可。
-        waitForPlaybackToSettle(
-          playQueuesRef.current[payload.agent_id],
-          speechQueueRef.current,
-        ).then(() => dispatch(payload))
+        // 事件都已經處理完、佇列裡已經包含這個 agent 這一輪的所有內容，
+        // 直接讀取當下的佇列 Promise 即可——就算 Job Group 平行模式下
+        // 其他 agent 之後又有新內容接在佇列後面，也不影響這裡已經捕捉到
+        // 的這個快照何時 resolve（同樣的捕捉快照寫法見 enqueueAudioForAgent
+        // 的 epoch 保護、以及 useDebateSession.js 的事件序列化管線）。
+        waitForPlaybackToSettle(playQueueRef.current, speechQueueRef.current).then(() =>
+          dispatch(payload),
+        )
         return
       }
 

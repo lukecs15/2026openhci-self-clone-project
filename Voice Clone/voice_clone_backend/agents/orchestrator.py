@@ -217,6 +217,21 @@ class MultiAgentOrchestrator:
         """
         平行處理多個 agent：每個 agent 各自完整跑完（LLM 串流 + TTS），
         事件用 asyncio.Queue 合併後依產生順序吐出，agent 之間互不等待。
+
+        修過的真實問題：使用者結束對話時（routers/ws_voice_agents.py 的
+        end_session 處理會 cancel 掉正在跑這個 async generator 的
+        asyncio.Task，讓「按下結束立刻進總結頁面」不用等生成跑完），
+        Python 會在這個 generator 目前卡住的 await 點（下面的
+        `await queue.get()`）注入 CancelledError；問題是這裡用
+        `asyncio.create_task()` 額外開出來的每個 agent 背景 task
+        （`tasks` 這個列表）並不是這個 generator 的「子項」，asyncio
+        沒有自動幫忙一起取消——就算外層被取消了，這些背景 task 仍然會
+        繼續在背景呼叫 LLM/TTS，白白浪費運算資源/API 額度，也違背使用者
+        「中斷當前的所有生成」的期待，只是前端不會再收到後續事件而已。
+        修法：`except asyncio.CancelledError` 時，主動把還沒完成的
+        agent task 全部 cancel() 並等它們真的停下來，再把 CancelledError
+        往外傳（跟 agents/debate.py 的取消哲學一致：不吞掉 CancelledError，
+        但要確保自己開出去的背景工作也一併真的停止）。
         """
         import asyncio
 
@@ -226,6 +241,8 @@ class MultiAgentOrchestrator:
             try:
                 async for event in self._run_single_agent(agent_id, user_text):
                     await queue.put(event)
+            except asyncio.CancelledError:
+                raise
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Job group agent %s 執行失敗：%s", agent_id, exc)
                 await queue.put({"type": "error", "message": str(exc), "agent_id": agent_id})
@@ -233,15 +250,22 @@ class MultiAgentOrchestrator:
                 await queue.put(None)  # 該 agent 結束標記
 
         tasks = [asyncio.create_task(_run_and_forward(aid)) for aid in agent_ids]
-        remaining = len(tasks)
-        while remaining > 0:
-            event = await queue.get()
-            if event is None:
-                remaining -= 1
-                continue
-            yield event
+        try:
+            remaining = len(tasks)
+            while remaining > 0:
+                event = await queue.get()
+                if event is None:
+                    remaining -= 1
+                    continue
+                yield event
 
-        await asyncio.gather(*tasks)
+            await asyncio.gather(*tasks)
+        except asyncio.CancelledError:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
 
     async def _synthesize_and_wrap(self, agent: AgentConfig, sentence: str) -> AsyncIterator[dict]:
         """

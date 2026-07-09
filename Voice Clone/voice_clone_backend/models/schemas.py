@@ -216,10 +216,17 @@ class RoutingDecision:
     多 Agent 編排器對「接下來誰該發話」的決策。
 
     Attributes:
-        mode: handoff（序列交接單一 agent）或 job_group（平行分派多個 agent）。
+        mode: handoff（序列交接）或 job_group（平行分派多個 agent）。
         target_agent_ids: 本輪要發話 / 處理的 agent id 列表。
-            - handoff 模式下長度固定為 1。
-            - job_group 模式下可為 2 個以上（辯論、腦力激盪等情境）。
+            - handoff 模式：依序（非平行）逐一呼叫，長度可以是 1 個（使用者
+              明確指名單一 agent、或 llm_decision 判斷只有一位該回應）、
+              也可以是多個（沒有指名時 heuristic 預設全體依序回應；或
+              llm_decision 判斷這句話同時指名/該由好幾位一起回應，見
+              agents/handoff.py「llm_decision 支援同時指名多位」說明），
+              不是固定為 1（曾經的說明過度簡化，heuristic 的「全體依序
+              回應」分支其實一直都會回傳多個 id，這裡修正成跟實際行為
+              一致）。
+            - job_group 模式：平行處理，可為 2 個以上（辯論、腦力激盪等情境）。
         reason: 決策理由（供除錯 / log 使用）。
     """
 

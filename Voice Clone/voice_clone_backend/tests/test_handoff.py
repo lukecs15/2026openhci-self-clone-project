@@ -7,7 +7,7 @@ import pytest
 from agents.handoff import (
     HandoffCoordinator,
     build_llm_routing_decision_fn,
-    parse_llm_tool_call_response,
+    parse_llm_routing_response,
 )
 from models.schemas import LLMTextChunk, RoutingMode
 
@@ -79,8 +79,8 @@ async def test_heuristic_picks_earliest_mentioned_name_reverse_order(sample_agen
 
 @pytest.mark.asyncio
 async def test_llm_decision_strategy_uses_injected_fn(sample_agents):
-    async def fake_llm_decision(user_text: str, agents) -> str:
-        return "agent-c"
+    async def fake_llm_decision(user_text: str, agents) -> list[str]:
+        return ["agent-c"]
 
     coordinator = HandoffCoordinator(strategy="llm_decision", llm_decision_fn=fake_llm_decision)
     decision = await coordinator.decide("隨便誰都可以回答", sample_agents)
@@ -91,8 +91,8 @@ async def test_llm_decision_strategy_uses_injected_fn(sample_agents):
 
 @pytest.mark.asyncio
 async def test_llm_decision_invalid_agent_id_falls_back_to_first(sample_agents):
-    async def fake_llm_decision(user_text: str, agents) -> str:
-        return "not-a-real-agent"
+    async def fake_llm_decision(user_text: str, agents) -> list[str]:
+        return ["not-a-real-agent"]
 
     coordinator = HandoffCoordinator(strategy="llm_decision", llm_decision_fn=fake_llm_decision)
     decision = await coordinator.decide("測試", sample_agents)
@@ -100,21 +100,80 @@ async def test_llm_decision_invalid_agent_id_falls_back_to_first(sample_agents):
     assert decision.target_agent_ids == [sample_agents[0].agent_id]
 
 
-def test_parse_llm_tool_call_response_valid_json():
-    raw = 'some preamble text {"target_agent_id": "agent-b"} trailing'
-    result = parse_llm_tool_call_response(raw, valid_agent_ids=["agent-a", "agent-b"])
-    assert result == "agent-b"
+@pytest.mark.asyncio
+async def test_llm_decision_can_target_multiple_agents(sample_agents):
+    """
+    迴歸測試：修過的真實回報問題——使用者說「小明、小華你們今天過得如何」
+    同時指名兩位，routing_strategy=llm_decision 卻只有一位回應（見
+    agents/handoff.py「llm_decision 支援同時指名多位」說明）。這裡驗證
+    當注入的 LLM 決策函式回傳多個 agent_id 時，HandoffCoordinator 會如實
+    採用，不會被硬性收斂成只剩一個。
+    """
+
+    async def fake_llm_decision(user_text: str, agents) -> list[str]:
+        return ["agent-a", "agent-b"]
+
+    coordinator = HandoffCoordinator(strategy="llm_decision", llm_decision_fn=fake_llm_decision)
+    decision = await coordinator.decide("小明、小華你們今天過得如何", sample_agents)
+
+    assert decision.mode == RoutingMode.HANDOFF
+    assert decision.target_agent_ids == ["agent-a", "agent-b"]
 
 
-def test_parse_llm_tool_call_response_invalid_agent_returns_empty():
-    raw = '{"target_agent_id": "agent-z"}'
-    result = parse_llm_tool_call_response(raw, valid_agent_ids=["agent-a", "agent-b"])
-    assert result == ""
+@pytest.mark.asyncio
+async def test_llm_decision_filters_invalid_ids_but_keeps_valid_ones(sample_agents):
+    """LLM 回傳的列表裡混著不存在的 agent_id（幻覺）時，應該只過濾掉不合法
+    的那個，保留其餘合法的 id，而不是整批 fallback 成只剩第一個 agent。"""
+
+    async def fake_llm_decision(user_text: str, agents) -> list[str]:
+        return ["agent-a", "not-a-real-agent", "agent-b"]
+
+    coordinator = HandoffCoordinator(strategy="llm_decision", llm_decision_fn=fake_llm_decision)
+    decision = await coordinator.decide("測試", sample_agents)
+
+    assert decision.target_agent_ids == ["agent-a", "agent-b"]
 
 
-def test_parse_llm_tool_call_response_no_json_returns_empty():
-    result = parse_llm_tool_call_response("這裡沒有 JSON", valid_agent_ids=["agent-a"])
-    assert result == ""
+@pytest.mark.asyncio
+async def test_llm_decision_dedupes_repeated_ids(sample_agents):
+    async def fake_llm_decision(user_text: str, agents) -> list[str]:
+        return ["agent-a", "agent-a", "agent-b"]
+
+    coordinator = HandoffCoordinator(strategy="llm_decision", llm_decision_fn=fake_llm_decision)
+    decision = await coordinator.decide("測試", sample_agents)
+
+    assert decision.target_agent_ids == ["agent-a", "agent-b"]
+
+
+def test_parse_llm_routing_response_valid_json_multiple_ids():
+    raw = 'some preamble text {"target_agent_ids": ["agent-b", "agent-a"]} trailing'
+    result = parse_llm_routing_response(raw, valid_agent_ids=["agent-a", "agent-b"])
+    assert result == ["agent-b", "agent-a"]
+
+
+def test_parse_llm_routing_response_filters_invalid_ids():
+    raw = '{"target_agent_ids": ["agent-a", "agent-z"]}'
+    result = parse_llm_routing_response(raw, valid_agent_ids=["agent-a", "agent-b"])
+    assert result == ["agent-a"]
+
+
+def test_parse_llm_routing_response_all_invalid_returns_empty():
+    raw = '{"target_agent_ids": ["agent-z"]}'
+    result = parse_llm_routing_response(raw, valid_agent_ids=["agent-a", "agent-b"])
+    assert result == []
+
+
+def test_parse_llm_routing_response_no_json_returns_empty():
+    result = parse_llm_routing_response("這裡沒有 JSON", valid_agent_ids=["agent-a"])
+    assert result == []
+
+
+def test_parse_llm_routing_response_backward_compat_singular_format():
+    """相容舊版單數格式 {"target_agent_id": "..."}（見 parse_llm_routing_response
+    說明）：就算 LLM 沒有照最新 prompt 的陣列格式回傳，也能正確解析。"""
+    raw = '{"target_agent_id": "agent-b"}'
+    result = parse_llm_routing_response(raw, valid_agent_ids=["agent-a", "agent-b"])
+    assert result == ["agent-b"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -152,7 +211,7 @@ class _BrokenRoutingLLMService:
 
 @pytest.mark.asyncio
 async def test_build_llm_routing_decision_fn_parses_target_agent(sample_agents):
-    fake_llm = _FakeRoutingLLMService('{"target_agent_id": "agent-c"}')
+    fake_llm = _FakeRoutingLLMService('{"target_agent_ids": ["agent-c"]}')
     decision_fn = build_llm_routing_decision_fn(fake_llm, timeout_ms=1000)
     coordinator = HandoffCoordinator(strategy="llm_decision", llm_decision_fn=decision_fn)
 
@@ -163,9 +222,23 @@ async def test_build_llm_routing_decision_fn_parses_target_agent(sample_agents):
 
 
 @pytest.mark.asyncio
+async def test_build_llm_routing_decision_fn_parses_multiple_target_agents(sample_agents):
+    """端到端驗證使用者實測回報的情境：LLM 判斷這句話該由多位角色一起
+    回應時（例如同時稱呼兩個人的名字），路由決策要如實反映多個 target。"""
+    fake_llm = _FakeRoutingLLMService('{"target_agent_ids": ["agent-a", "agent-b"]}')
+    decision_fn = build_llm_routing_decision_fn(fake_llm, timeout_ms=1000)
+    coordinator = HandoffCoordinator(strategy="llm_decision", llm_decision_fn=decision_fn)
+
+    decision = await coordinator.decide("小明、小華你們今天過得如何", sample_agents)
+
+    assert decision.mode == RoutingMode.HANDOFF
+    assert decision.target_agent_ids == ["agent-a", "agent-b"]
+
+
+@pytest.mark.asyncio
 async def test_build_llm_routing_decision_fn_times_out_and_falls_back(sample_agents):
     """
-    LLM 呼叫逾時（超過 timeout_ms）時，routing 函式應回傳空字串，讓
+    LLM 呼叫逾時（超過 timeout_ms）時，routing 函式應回傳空 list，讓
     HandoffCoordinator._decide_via_llm fallback 用候選名單第一個 agent，
     不會讓整輪對話因為路由判斷卡住而永遠等下去。
     """
