@@ -342,6 +342,42 @@ class DebateOrchestrator:
             return max(text_len * 200.0, 500.0)
         return _audio_duration_ms(tts_event.get("audio_bytes"), tts_event.get("sample_rate", 24000))
 
+    def _format_history_for_summary(self) -> str:
+        """跟 orchestrator._format_history_for_summary 相同邏輯：把
+        self.history 整理成「顯示名稱／使用者：內容」逐行文字。"""
+        lines: list[str] = []
+        for turn in self.history:
+            if turn["role"] == "user":
+                lines.append(f"使用者：{turn['text']}")
+                continue
+            speaker = self._agents_by_id.get(turn.get("agent_id"))
+            speaker_name = speaker.display_name if speaker else turn.get("agent_id", "assistant")
+            lines.append(f"{speaker_name}：{turn['text']}")
+        return "\n".join(lines)
+
+    async def generate_summary(self) -> str:
+        """
+        辯論結束時呼叫：把整場討論歷史（含主題）整理成文字，請 LLM 生成
+        一句總結性的鼓勵話語，作為使用者可以帶走的紀念品（見
+        routers/ws_debate.py 的 end_session 處理）。設計理由同
+        agents/orchestrator.py 的 generate_summary()：不重用
+        _build_messages()，改成一次性塞進單一個 user message，agent_id
+        固定用 "summary"。
+        """
+        transcript = self._format_history_for_summary()
+        if not transcript:
+            return "謝謝你今天願意花時間傾聽與思考，每一次自我對話都是成長的養分。"
+
+        system_prompt = _DEBATE_SUMMARY_SYSTEM_PROMPT_TEMPLATE.format(topic_title=self.topic.title)
+        messages = [{"role": "user", "content": f"以下是這場討論的紀錄：\n{transcript}"}]
+
+        full_text_parts: list[str] = []
+        async for token in self.llm_service.stream_reply("summary", system_prompt, messages):
+            if token.is_final:
+                break
+            full_text_parts.append(token.delta_text)
+        return "".join(full_text_parts).strip()
+
     async def _synthesize_and_wrap(self, agent: AgentConfig, sentence: str) -> AsyncIterator[dict]:
         """
         跟 orchestrator._synthesize_and_wrap 相同邏輯：一句只在第一個音訊
