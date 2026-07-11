@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import get_settings
-from routers import voice_profiles, ws_debate, ws_voice_agents
+from routers import onboarding, voice_profiles, ws_debate, ws_voice_agents
 
 load_dotenv()
 
@@ -40,13 +40,21 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_origin, "http://localhost:5174"],
+    # 手機 onboarding 前端（mobile_frontend_origin）跟主系統展示端
+    # （frontend_origin）是兩個不同的來源，各自直接打這台後端的 REST API，
+    # 兩個都要放行。
+    allow_origins=[settings.frontend_origin, settings.mobile_frontend_origin, "http://localhost:5174"],
+    # 額外支援 regex（見 config.py 的 mobile_frontend_origin_regex 說明）：
+    # 用 cloudflared quick tunnel 測試手機前端時，網域每次重啟都會變，設一
+    # 次 regex（例如 *.trycloudflare.com）就不用每次重新設定/重啟後端。
+    allow_origin_regex=settings.mobile_frontend_origin_regex or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.include_router(voice_profiles.router, prefix="/api")
+app.include_router(onboarding.router, prefix="/api")
 app.include_router(ws_voice_agents.router)
 app.include_router(ws_debate.router)
 

@@ -94,6 +94,21 @@ class Settings(BaseSettings):
     voice_profiles_dir: str = "voice_profiles"
     voice_sample_max_bytes: int = 20 * 1024 * 1024
 
+    # ── Mobile Onboarding 設定（Big Five 問卷 → 5 位自我 agent，見
+    #    services/personality_mapping.py + routers/onboarding.py）─────
+    onboarding_sessions_dir: str = "onboarding_sessions"
+    # 手機端網頁的 origin，onboarding 專用 REST（/api/onboarding-sessions/...）
+    # 需要額外允許這個來源（跟主系統展示端的 frontend_origin 是不同來源，
+    # 手機瀏覽器直接打這台後端的 API）。
+    mobile_frontend_origin: str = "http://localhost:5175"
+    # 用 cloudflared quick tunnel（`cloudflared tunnel --url ...`）打手機前端
+    # 出去時，網域是每次重啟都會換的隨機子網域（*.trycloudflare.com），若只
+    # 靠 mobile_frontend_origin 的精確比對，每次重啟 tunnel 都要重新設定、
+    # 重啟後端。這裡額外支援一個 regex（可留空，預設不啟用），設一次就好，
+    # 之後 tunnel 網域怎麼換都不用再改：
+    #   MOBILE_FRONTEND_ORIGIN_REGEX=https://.*\.trycloudflare\.com
+    mobile_frontend_origin_regex: str = ""
+
     # ── 多 Agent 設定 ─────────────────────────────────────────────
     max_concurrent_agents: int = 4
     # heuristic：規則式（指名 / 全體依序回應），不呼叫 LLM，延遲最低，預設值。

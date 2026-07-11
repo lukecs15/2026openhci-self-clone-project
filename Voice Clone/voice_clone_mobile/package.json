@@ -1,5 +1,5 @@
 {
-  "name": "voice-clone-frontend",
+  "name": "voice-clone-mobile",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,11 +12,9 @@
     "lint": "eslint src --ext .js,.jsx --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
-    "qrcode": "^1.5.4",
+    "jsqr": "^1.4.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "uuid": "^11.0.3",
-    "zustand": "^5.0.2"
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@types/react": "^18.3.12",

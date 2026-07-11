@@ -48,13 +48,15 @@
  * routers/ws_voice_agents.py / routers/ws_debate.py 的 end_session 處理）。
  */
 
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { v4 as uuidv4 } from 'uuid'
+import QRCode from 'qrcode'
 import { useVoiceAgentSession } from '../hooks/useVoiceAgentSession'
 import { useDebateSession } from '../hooks/useDebateSession'
 import { DEFAULT_DEMO_AGENTS } from '../api/voiceAgentClient'
 import { DEBATE_TOPIC_OPTIONS } from '../api/voiceDebateClient'
 import { applyVoiceProfileToAgents } from '../store/voiceProfileAssignment'
+import { getWaveformSignature, mergeWaveformSignatures } from '../utils/waveformSignature'
 import AgentStage from '../components/AgentStage'
 import TranscriptLog from '../components/TranscriptLog'
 import MicControl from '../components/MicControl'
@@ -62,6 +64,10 @@ import VoiceProfileUploader from '../components/VoiceProfileUploader'
 import DebateStage from '../components/DebateStage'
 import DevToggleLabel from '../components/DevToggleLabel'
 import SessionSummaryScreen from '../components/SessionSummaryScreen'
+import OnboardingLinkGate from '../components/OnboardingLinkGate'
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8200/api'
+const MOBILE_FRONTEND_URL = import.meta.env.VITE_MOBILE_FRONTEND_URL || 'http://localhost:5175'
 
 const ROUTING_STRATEGY_OPTIONS = [
   { value: '', label: '使用後端設定（.env 的 AGENT_ROUTING_STRATEGY）' },
@@ -93,8 +99,96 @@ export default function VoiceAgentsPage() {
   const [debateAgentIds, setDebateAgentIds] = useState([])
   const [chatEndHovered, setChatEndHovered] = useState(false)
 
+  // ── Mobile onboarding：開場掃 QR 連結手機問卷 ─────────────────────────
+  // session_id 不重用 chatSessionId/debateSessionId（那兩個各自對應一種
+  // WebSocket 對話類型），onboarding 是「連結手機資料」這個獨立概念，
+  // 用自己的一組 id，QR 內容帶這個 id，手機上傳的 5 位 agent 連結成功後
+  // 直接覆寫 agents state，兩種模式都能用（見 handleOnboardingLinked）。
+  const [onboardingSessionId, setOnboardingSessionId] = useState(() => uuidv4())
+  const [onboardingLinked, setOnboardingLinked] = useState(false)
+  const [onboardingSkipped, setOnboardingSkipped] = useState(false)
+  const [resultQrDataUrl, setResultQrDataUrl] = useState('')
+  const [resultPosted, setResultPosted] = useState(false)
+
+  const onboardingLinkUrl = `${MOBILE_FRONTEND_URL}/link?session=${onboardingSessionId}`
+
   const chat = useVoiceAgentSession(chatSessionId)
   const debate = useDebateSession(debateSessionId)
+
+  const handleOnboardingLinked = useCallback((linkedAgents) => {
+    if (linkedAgents && linkedAgents.length > 0) {
+      setAgents(linkedAgents)
+    }
+    setOnboardingLinked(true)
+  }, [])
+
+  const handleRegenerateOnboardingQr = useCallback(() => {
+    setOnboardingSessionId(uuidv4())
+    setOnboardingLinked(false)
+  }, [])
+
+  const handleSkipOnboarding = useCallback(() => {
+    setOnboardingSkipped(true)
+  }, [])
+
+  // ── 結束對話／討論後，把總結 + 融合波形回寫給後端，讓手機掃第二個 QR 取回 ──
+  // 只在「有經過 onboarding 連結」（不是略過連結）的情境下才做，略過連結時
+  // 沒有對應的 session_id 可以掛結果。融合波形算法直接沿用
+  // SessionSummaryScreen.jsx 用的同一個 mergeWaveformSignatures()，這裡
+  // 重新算一次（純函式、成本很低）單純是因為要在 POST 的當下就拿到結果，
+  // 不想讓 SessionSummaryScreen 額外負責回報資料給外面。
+  useEffect(() => {
+    if (onboardingSkipped || resultPosted) return
+    const status = appMode === 'chat' ? chat.state.status : debate.state.status
+    if (status !== 'summary') return
+
+    const activeAgents = appMode === 'chat' ? chat.state.agents : debate.state.agents
+    const summaryText = appMode === 'chat' ? chat.state.summaryText : debate.state.summaryText
+    const mergedSignature = mergeWaveformSignatures(
+      (activeAgents || []).map((agent) => getWaveformSignature(agent)),
+    )
+    const participantAgents = (activeAgents || []).map((agent) => ({
+      agent_id: agent.agent_id,
+      display_name: agent.display_name,
+      role_tag: agent.role_tag,
+    }))
+
+    setResultPosted(true) // 先設定，避免這個 effect 因為其他 state 變化重新觸發而重複 POST
+    fetch(`${API_BASE_URL}/onboarding-sessions/${onboardingSessionId}/result`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        summary_text: summaryText,
+        waveform_signature: mergedSignature,
+        participant_agents: participantAgents,
+      }),
+    })
+      .then((res) => {
+        if (!res.ok) return null
+        return QRCode.toDataURL(`${MOBILE_FRONTEND_URL}/result?session=${onboardingSessionId}`, {
+          width: 220,
+          margin: 1,
+        })
+      })
+      .then((url) => {
+        if (url) setResultQrDataUrl(url)
+      })
+      .catch(() => {
+        // 回寫結果失敗不影響使用者體驗本身（結束畫面照常顯示），只是
+        // 手機端這次拿不到紀念品，先不做重試機制。
+      })
+  }, [
+    appMode,
+    chat.state.status,
+    chat.state.agents,
+    chat.state.summaryText,
+    debate.state.status,
+    debate.state.agents,
+    debate.state.summaryText,
+    onboardingSessionId,
+    onboardingSkipped,
+    resultPosted,
+  ])
 
   const handleApplyVoiceProfile = (profileId, target) => {
     setAgents((prev) => applyVoiceProfileToAgents(prev, profileId, target))
@@ -142,10 +236,23 @@ export default function VoiceAgentsPage() {
   // SessionSummaryScreen 按下離開按鈕才是真正的收尾：斷線、把 reducer 狀態
   // 重置回初始值（避免下一次重新開始時畫面殘留上一場的 transcript／
   // summaryText／status），回到模式選擇畫面。
+  // 離開結束畫面時，順便重置 onboarding 連結狀態、換一組新的 session_id——
+  // 「理想上主系統應該只會有一個對話一個裝置進行」，下一輪應該是全新的
+  // 連結槽，不能沿用上一輪已經 completed 的 onboardingSessionId（沿用的話
+  // 下一次 /link 會撞到「已經連結過」的 409）。
+  const resetOnboardingForNextRound = () => {
+    setOnboardingSessionId(uuidv4())
+    setOnboardingLinked(false)
+    setOnboardingSkipped(false)
+    setResultQrDataUrl('')
+    setResultPosted(false)
+  }
+
   const handleLeaveChatSummary = () => {
     chat.disconnect()
     chat.reset()
     setStarted(false)
+    resetOnboardingForNextRound()
   }
 
   const handleLeaveDebateSummary = () => {
@@ -154,6 +261,7 @@ export default function VoiceAgentsPage() {
     setStarted(false)
     setDebateTopicId('')
     setDebateAgentIds([])
+    resetOnboardingForNextRound()
   }
 
   const activeStatus = appMode === 'chat' ? chat.state.status : debate.state.status
@@ -179,8 +287,21 @@ export default function VoiceAgentsPage() {
       </header>
 
       <main style={{ maxWidth: '720px', margin: '0 auto', padding: '1.5rem' }}>
-        {!started ? (
+        {!started && !onboardingLinked && !onboardingSkipped ? (
+          <OnboardingLinkGate
+            sessionId={onboardingSessionId}
+            linkUrl={onboardingLinkUrl}
+            onLinked={handleOnboardingLinked}
+            onSkip={handleSkipOnboarding}
+            onRegenerate={handleRegenerateOnboardingQr}
+          />
+        ) : !started ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            {onboardingLinked && (
+              <p style={{ margin: 0, fontSize: '0.8rem', color: '#a5b4fc' }}>
+                已透過手機問卷連結，載入 5 位「自我」agent（都套用你剛剛克隆的聲音）。
+              </p>
+            )}
             <VoiceProfileUploader agents={agents} onApply={handleApplyVoiceProfile} />
             <ul style={{ fontSize: '0.8rem', color: '#94a3b8', paddingLeft: '1.2rem' }}>
               {agents.map((agent) => (
@@ -317,11 +438,14 @@ export default function VoiceAgentsPage() {
           </div>
         ) : appMode === 'chat' ? (
           chat.state.status === 'summary' ? (
-            <SessionSummaryScreen
-              agents={chat.state.agents}
-              summaryText={chat.state.summaryText}
-              onLeave={handleLeaveChatSummary}
-            />
+            <>
+              <SessionSummaryScreen
+                agents={chat.state.agents}
+                summaryText={chat.state.summaryText}
+                onLeave={handleLeaveChatSummary}
+              />
+              <ResultQrOverlay dataUrl={resultQrDataUrl} sessionId={onboardingSessionId} />
+            </>
           ) : (
             <>
               <AgentStage
@@ -391,11 +515,14 @@ export default function VoiceAgentsPage() {
             </>
           )
         ) : debate.state.status === 'summary' ? (
-          <SessionSummaryScreen
-            agents={debate.state.agents}
-            summaryText={debate.state.summaryText}
-            onLeave={handleLeaveDebateSummary}
-          />
+          <>
+            <SessionSummaryScreen
+              agents={debate.state.agents}
+              summaryText={debate.state.summaryText}
+              onLeave={handleLeaveDebateSummary}
+            />
+            <ResultQrOverlay dataUrl={resultQrDataUrl} sessionId={onboardingSessionId} />
+          </>
         ) : (
           <DebateStage
             agents={debate.state.agents}
@@ -420,6 +547,48 @@ export default function VoiceAgentsPage() {
 
         {activeError && <p style={{ color: '#ef4444', fontSize: '0.85rem' }}>錯誤：{activeError}</p>}
       </main>
+    </div>
+  )
+}
+
+/**
+ * ResultQrOverlay — 結束畫面上的「掃碼帶回手機」小 QR，疊在 SessionSummaryScreen
+ * 上方（zIndex 高於它的 1000）。刻意做成獨立、極簡的元件、不去動
+ * SessionSummaryScreen.jsx 本身：那個畫面的轉場/匯聚動畫細節已經調過，
+ * 這裡先只求功能可以測（結果有沒有正確回寫、QR 內容對不對），視覺設計
+ * 之後再跟 SessionSummaryScreen 一起討論怎麼整合得更好看。
+ * dataUrl 還沒準備好（回寫結果還在進行中，或使用者略過了 onboarding 連結）
+ * 時不顯示任何東西。
+ */
+function ResultQrOverlay({ dataUrl, sessionId }) {
+  if (!dataUrl) return null
+  // 原本放右上角 140px，跟 SessionSummaryScreen 置中的總結文字（maxWidth
+  // 640px）在較窄的視窗/直式螢幕上會疊在一起，使用者反應「擋到總結語」。
+  // 改放左下角、縮小到 92px——SessionSummaryScreen 的文字與離開按鈕都是
+  // 水平置中，左下角是唯一不會被內容經過的角落。順便把 session id 前 8
+  // 碼印出來，手機掃不到時可以用手機端「連結上傳」畫面的手動輸入退路。
+  return (
+    <div
+      style={{
+        position: 'fixed',
+        bottom: '1.25rem',
+        left: '1.25rem',
+        zIndex: 1001,
+        background: 'rgba(15,23,42,0.85)',
+        borderRadius: '0.6rem',
+        padding: '0.5rem',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: '0.3rem',
+        backdropFilter: 'blur(4px)',
+      }}
+    >
+      <img src={dataUrl} alt="掃描帶回手機的 QR code" style={{ width: 92, height: 92, borderRadius: '0.4rem' }} />
+      <span style={{ fontSize: '0.62rem', color: '#e2e8f0' }}>掃描帶回手機</span>
+      {sessionId && (
+        <span style={{ fontSize: '0.58rem', color: '#64748b' }}>代碼：{sessionId.slice(0, 8)}</span>
+      )}
     </div>
   )
 }

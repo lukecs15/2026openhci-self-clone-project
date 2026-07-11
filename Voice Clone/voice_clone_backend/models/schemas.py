@@ -31,6 +31,23 @@ class AgentConfig(BaseModel):
     voice_profile_id: str = Field("", description="對應的克隆語音 profile ID（CosyVoice 2）")
     # 用於 Job Group 情境下標示此 agent 的角色定位（例如 "支持方" / "反對方" / "主持人"）
     role_tag: str = Field("", description="辯論 / 討論情境下的角色標籤")
+    # 波形頭像的「人格簽章」覆寫欄位。結構對照前端 utils/waveformSignature.js
+    # 的 getWaveformSignature() 回傳值：
+    #   { frequency, amplitude, waveHeight, waveformShape, hue, colorIntensity }
+    # 前端已經預留這個接線點（同檔案「接線點：之後問卷流程」段落）：agent 物件
+    # 一旦帶有這個欄位，getWaveformSignature() 會直接優先採用、完全略過原本
+    # 依 agent_id 雜湊挑 preset 的邏輯，呼叫端（WaveformAvatar / AgentStage）
+    # 不需要跟著改。這裡新增欄位是為了讓後端 Big Five 問卷生成的 5 位「自我」
+    # agent（見 services/personality_mapping.py）可以把分數換算出的真實波形
+    # 參數直接帶給前端使用，不再是隨機 preset。留空（None）時前端會照舊使用
+    # 原本的 agent_id 雜湊 preset 邏輯，向後相容既有的 3 位 demo agent。
+    waveform_signature: Optional[dict] = Field(
+        None,
+        description=(
+            "波形頭像覆寫參數（frequency/amplitude/waveHeight/waveformShape/"
+            "hue/colorIntensity），留空則前端使用預設 preset 邏輯"
+        ),
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -52,6 +69,68 @@ class VoiceProfile(BaseModel):
     reference_audio_path: str = Field(..., description="參考音訊檔案的絕對路徑")
     reference_text: str = Field("", description="參考音訊的逐字稿（zero-shot 克隆必需）")
     created_at: str = Field("", description="建立時間（ISO 8601）")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Mobile Onboarding：Big Five 問卷 + 聲音克隆 → 主系統體驗 → 結果傳回手機
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# 對應手機端流程：
+#   1. 使用者在手機獨立填 Big Five 問卷 + 錄一段聲音樣本
+#   2. 掃描主系統顯示的 QR（帶 session_id）→ POST /link，後端建立聲音克隆
+#      profile + 依五個向度生成 5 位「自我」agent（見 services/personality_mapping.py）
+#   3. 主系統輪詢／查詢到已連結，載入這 5 位 agent 讓使用者選 2 位進辯論模式
+#      （沿用既有辯論模式的所有邏輯，不需要改）
+#   4. 辯論結束，主系統把總結句子 + 融合波形 POST /result 寫回
+#   5. 主系統顯示第二個 QR，手機掃描 GET /result 取得紀念畫面資料
+#
+# 「理想上主系統應該只會有一個對話一個裝置進行」：session_id 直接沿用主系統
+# 既有 WebSocket 對話的 session_id（前端本來就會自己產生 uuid），onboarding
+# 這裡不另外發一組 id，QR 內容就是「手機連結頁網址 + 這個 session_id」。
+
+
+class BigFiveScores(BaseModel):
+    """
+    Big Five 五大人格量表的彙整分數，每個向度 0~100（50 為中性）。
+
+    刻意不接收「原始題目作答」（例如第幾題選了幾分），只接收手機前端換算好
+    的五個彙整分數——題目本身（幾題、幾點量表、實際文案）之後可能會調整，
+    這樣調整題目不需要跟著改後端／這個 schema。
+    """
+
+    openness: float = Field(50.0, ge=0, le=100, description="開放性")
+    conscientiousness: float = Field(50.0, ge=0, le=100, description="盡責性")
+    extraversion: float = Field(50.0, ge=0, le=100, description="外向性")
+    agreeableness: float = Field(50.0, ge=0, le=100, description="親和性")
+    neuroticism: float = Field(50.0, ge=0, le=100, description="負面情緒")
+
+
+class OnboardingResult(BaseModel):
+    """體驗結束後要傳回手機的「紀念品」內容。"""
+
+    summary_text: str = Field("", description="LLM 生成的結束總結句子")
+    waveform_signature: Optional[dict] = Field(
+        None, description="融合波形（mergeWaveformSignatures() 的結果，供手機端渲染紀念畫面）"
+    )
+    participant_agents: list[dict] = Field(
+        default_factory=list,
+        description="有參與這場對話/辯論的 agent 簡要資訊（agent_id/display_name/role_tag），供手機端顯示",
+    )
+
+
+class OnboardingSession(BaseModel):
+    """一場「手機問卷 → 主系統體驗 → 結果回傳手機」的完整生命週期紀錄。"""
+
+    session_id: str = Field(..., description="與主系統 WebSocket 對話共用的 session_id")
+    status: Literal["linked", "completed"] = Field(
+        "linked", description="linked：問卷+聲音已上傳，5 位 agent 已生成；completed：體驗結束，結果已寫回"
+    )
+    big_five_scores: BigFiveScores
+    voice_profile_id: str = Field("", description="這場對話使用的聲音克隆 profile id")
+    agents: list[AgentConfig] = Field(default_factory=list, description="依 Big Five 分數生成的 5 位自我 agent")
+    result: Optional[OnboardingResult] = Field(None, description="體驗結束後回寫的總結與融合波形")
+    linked_at: str = Field("", description="問卷/聲音上傳完成時間（ISO 8601）")
+    completed_at: str = Field("", description="體驗結束、結果回寫時間（ISO 8601）")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

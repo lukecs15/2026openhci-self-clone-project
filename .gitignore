@@ -151,6 +151,10 @@ Thumbs.db
 /Voice Clone/voice_clone_frontend/node_modules/
 /Voice Clone/voice_clone_frontend/dist/
 /Voice Clone/voice_clone_frontend/.vite/
+/Voice Clone/voice_clone_mobile/node_modules/
+/Voice Clone/voice_clone_mobile/dist/
+/Voice Clone/voice_clone_mobile/.vite/
 /Voice Clone/voice_clone_backend/venv/
 /Voice Clone/voice_clone_backend/.pytest_cache/
 /Voice Clone/voice_clone_backend/voice_profiles/
+/Voice Clone/voice_clone_backend/onboarding_sessions/
