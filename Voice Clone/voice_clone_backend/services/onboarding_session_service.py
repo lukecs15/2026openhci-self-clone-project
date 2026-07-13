@@ -63,6 +63,7 @@ class OnboardingSessionService:
         voice_profile_id: str,
         agents: list[AgentConfig],
         *,
+        topic_title: str = "",
         allow_relink: bool = False,
     ) -> OnboardingSession:
         """
@@ -83,6 +84,7 @@ class OnboardingSessionService:
             session_id=session_id,
             status="linked",
             big_five_scores=big_five_scores,
+            topic_title=topic_title,
             voice_profile_id=voice_profile_id,
             agents=agents,
             result=None,

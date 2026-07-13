@@ -15,7 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import get_settings
-from routers import onboarding, voice_profiles, ws_debate, ws_voice_agents
+from routers import onboarding, qr, voice_profiles, ws_debate, ws_voice_agents
 
 load_dotenv()
 
@@ -63,6 +63,7 @@ app.add_middleware(
 
 app.include_router(voice_profiles.router, prefix="/api")
 app.include_router(onboarding.router, prefix="/api")
+app.include_router(qr.router, prefix="/api")
 app.include_router(ws_voice_agents.router)
 app.include_router(ws_debate.router)
 

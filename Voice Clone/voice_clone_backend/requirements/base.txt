@@ -35,6 +35,9 @@ numpy>=1.26.0,<2.0.0
 soundfile>=0.12.1
 av>=12.0.0
 
+# QR code 產生（routers/qr.py：Unity Start/End scene 顯示的手機連結/結果 QR）
+qrcode[pil]>=7.4.0
+
 # 測試
 pytest>=8.0.0
 pytest-asyncio>=0.23.0

@@ -17,6 +17,36 @@
  *     → result-scan（設計稿沒有，既有功能：體驗結束後掃第二個 QR 查看
  *       融合波形+總結）
  *                                                       └→ error（可重試）
+ * 流程順序（修過的設計錯誤，見檔案下方說明）：使用者先在手機上「獨立」
+ * 填完問卷、錄好聲音樣本，完全不需要 session id；只有到最後「連結上傳」
+ * 這一步，才需要取得 session id——用手機相機掃主系統畫面上的 QR code
+ * （見 components/QrScanner.jsx），或直接手動輸入，兩種方式都可以。取得
+ * session id 後才真的呼叫 POST /api/onboarding-sessions/{id}/link 把問卷
+ * 分數 + 聲音樣本一次送出。桌機那邊輪詢到 status=linked 就會自動載入這裡
+ * 生成的 5 位「自我」agent（見 voice_clone_frontend/components/
+ * OnboardingLinkGate.jsx）。
+ *
+ * ── 修過的設計錯誤 ──────────────────────────────────────────────────────
+ * 第一版把「輸入/掃描 session id」放在最前面（歡迎頁就要求要有 session id
+ * 才能開始填問卷），這樣的假設是「使用者掃了桌機的 QR 才會打開這個網站」。
+ * 但實際規劃的流程是反過來：使用者可能提早、甚至不在桌機前就先把問卷填完
+ * （例如排隊等待時），填完才需要找到桌機、掃碼把資料傳過去建立連結——
+ * session id 應該只在最後「連結上傳」這一步才需要，不該卡在流程最前面。
+ *
+ * 步驟狀態機（純粹用 React state 管理，這幾個步驟不需要各自獨立的網址，
+ * 使用者中途重新整理頁面本來就會回到起點，跟填一般問卷網站的體驗一致）：
+ *   welcome → questionnaire → record → topic → connect → submitting → done → result-scan
+ *                                                                   └→ error（可重試）
+ *
+ * ── topic 步驟（內在法庭議題）───────────────────────────────────────────
+ * 錄音之後、連結上傳之前，讓使用者決定這次要在「內在法庭」審理的議題：
+ *   - 'auto'：不輸入，後端會用錄音的 STT 逐字稿以 LLM 推導議題（所以錄音
+ *     步驟的引導文案請使用者「說說最近的煩惱」，一段錄音同時當克隆樣本
+ *     與議題素材）。
+ *   - 'preset'：沒有想法時，從幾個預設議題中選一個。
+ *   - 'custom'：自行輸入一句話描述煩惱。
+ * 最終以 `topic` 欄位隨 link POST 送出（空字串 = auto，見
+ * api/onboardingClient.js 與後端 routers/onboarding.py）。
  *
  * v2 改版重點（跟第一版 inner-court-survey-fix8.html 比對後的差異，逐一
  * 核對過套用進來）：
@@ -123,6 +153,9 @@ export default function OnboardingFlow() {
     const d = new Date()
     return `心智紀元 ${d.getFullYear()} 年 ${d.getMonth() + 1} 月 ${d.getDate()} 日`
   }, [])
+  const [topicChoice, setTopicChoice] = useState('auto') // 'auto' | 'preset' | 'custom'
+  const [topicPreset, setTopicPreset] = useState('')
+  const [topicCustom, setTopicCustom] = useState('')
 
   const mediaRecorderRef = useRef(null)
   const chunksRef = useRef([])
@@ -334,6 +367,26 @@ export default function OnboardingFlow() {
     window.location.assign(`/result?session=${encodeURIComponent(resultSessionInput)}`)
   }
 
+  // 依 topicChoice 算出最後要送出的議題字串（'auto' = 空字串，後端自動推導）。
+  const resolveTopic = () => {
+    if (topicChoice === 'preset') return topicPreset
+    if (topicChoice === 'custom') return topicCustom.trim()
+    return ''
+  }
+
+  const handleFinishTopic = () => {
+    if (topicChoice === 'preset' && !topicPreset) {
+      setErrorMessage('請先選一個議題，或改用「讓系統從錄音判斷」')
+      return
+    }
+    if (topicChoice === 'custom' && !topicCustom.trim()) {
+      setErrorMessage('請輸入你想討論的煩惱，或改用其他方式')
+      return
+    }
+    setErrorMessage('')
+    setStep('connect')
+  }
+
   const handleSubmit = async () => {
     if (!sessionId) {
       setErrorMessage('還沒有連結代碼（session id），請先掃描 QR code 或手動輸入')
@@ -347,7 +400,7 @@ export default function OnboardingFlow() {
     setErrorMessage('')
     setStep('submitting')
     try {
-      const session = await linkOnboardingSession(sessionId, scores, audioBlob)
+      const session = await linkOnboardingSession(sessionId, scores, audioBlob, resolveTopic())
       setLinkedAgents(session.agents || [])
       setStep('done')
     } catch (err) {
@@ -398,6 +451,31 @@ export default function OnboardingFlow() {
           onDone={() => setStep('connect')}
         />
       )}
+        {step === 'record' && (
+          <RecordStep
+            isRecording={isRecording}
+            audioUrl={audioUrl}
+            errorMessage={errorMessage}
+            onStart={startRecording}
+            onStop={stopRecording}
+            onReRecord={handleReRecord}
+            onNext={() => setStep('topic')}
+          />
+        )}
+
+        {step === 'topic' && (
+          <TopicStep
+            choice={topicChoice}
+            onChoiceChange={(c) => { setErrorMessage(''); setTopicChoice(c) }}
+            preset={topicPreset}
+            onPresetChange={setTopicPreset}
+            custom={topicCustom}
+            onCustomChange={setTopicCustom}
+            errorMessage={errorMessage}
+            onBack={() => setStep('record')}
+            onNext={handleFinishTopic}
+          />
+        )}
 
       {step === 'connect' && (
         <ConnectStep
@@ -509,6 +587,14 @@ function TrialStep({ courtWavesRef, answers, questionIndex, currentQuestion, law
         {BIG_FIVE_QUESTIONS.map((q, i) => (
           <i key={q.id} className={i < questionIndex ? 'done' : ''} />
         ))}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+      <div style={cardStyle}>
+        <p style={{ margin: 0, lineHeight: 1.7, color: colors.textMuted }}>
+          請在安靜的環境，用 5~15 秒自然地「說說你最近的煩惱或內耗」。
+          這段錄音會同時用來克隆你的音色（5 位自我 agent 都會用這個聲音
+          回覆），系統也可以直接從這段話判斷你想在內在法庭討論的議題
+          ——如果暫時沒有想法，隨意念一段話也可以，下一步能改選預設議題。
+        </p>
       </div>
       <div className="trialHead">
         <span className="serif">審訊・心智基因定序</span>
@@ -600,6 +686,9 @@ function TestimonyStep({ isRecording, audioUrl, recTimeLabel, analyserNode, erro
           <button type="button" className="btn secondary" onClick={onReRecord}>
             重新錄音
           </button>
+          <button onClick={onNext} style={primaryButtonStyle(true)}>
+            下一步：選擇討論議題
+          </button>
         </div>
       )}
 
@@ -612,6 +701,178 @@ function TestimonyStep({ isRecording, audioUrl, recTimeLabel, analyserNode, erro
         </button>
       )}
       <div className="spacer" />
+    </div>
+  )
+}
+
+// 預設議題（沒有想法時三選一）。這裡是純文字，會以 `topic` 欄位原樣送給
+// 後端當自訂議題標題（不對應後端 DEFAULT_DEBATE_TOPICS 的 topic_id，統一
+// 走 custom topic 路徑，讓開庭廣播與判決書都以這個標題呈現）。
+const PRESET_TOPICS = [
+  '如何面對失敗與挫折',
+  '如何設立個人界線，兼顧他人期待與自己的需求',
+  '如何克服拖延，建立自律',
+]
+
+/**
+ * TopicStep — 選擇要在「內在法庭」審理的議題（見檔案開頭 topic 步驟說明）。
+ */
+function TopicStep({ choice, onChoiceChange, preset, onPresetChange, custom, onCustomChange, errorMessage, onBack, onNext }) {
+  const optionStyle = (active) => ({
+    ...cardStyle,
+    padding: '0.85rem 1rem',
+    textAlign: 'left',
+    cursor: 'pointer',
+    border: `1px solid ${active ? colors.accent : colors.border}`,
+    background: active ? 'rgba(99,102,241,0.12)' : colors.card,
+  })
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      <div style={cardStyle}>
+        <p style={{ margin: 0, lineHeight: 1.7, color: colors.textMuted }}>
+          你想在「內在法庭」審理什麼樣的個案？兩位克隆自我會圍繞這個議題
+          激辯，你將以法官的身分聽審並介入。
+        </p>
+      </div>
+
+      <div style={optionStyle(choice === 'auto')} onClick={() => onChoiceChange('auto')}>
+        <strong>讓系統從我的錄音判斷</strong>
+        <p style={{ margin: '0.35rem 0 0', fontSize: '0.8rem', color: colors.textMuted }}>
+          用剛剛那段「說說最近的煩惱」的錄音內容，自動整理出議題。
+        </p>
+      </div>
+
+      <div style={optionStyle(choice === 'preset')} onClick={() => onChoiceChange('preset')}>
+        <strong>從預設議題中選一個</strong>
+        {choice === 'preset' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.6rem' }}>
+            {PRESET_TOPICS.map((t) => (
+              <button
+                key={t}
+                onClick={(e) => { e.stopPropagation(); onPresetChange(t) }}
+                style={{
+                  ...secondaryButtonStyle,
+                  textAlign: 'left',
+                  border: `1px solid ${preset === t ? colors.accent : colors.border}`,
+                  color: preset === t ? colors.text : colors.textMuted,
+                }}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={optionStyle(choice === 'custom')} onClick={() => onChoiceChange('custom')}>
+        <strong>自己輸入</strong>
+        {choice === 'custom' && (
+          <input
+            value={custom}
+            onChange={(e) => onCustomChange(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            placeholder="用一句話描述你的煩惱，例如「該不該離職去進修」"
+            style={{
+              marginTop: '0.6rem',
+              width: '100%',
+              boxSizing: 'border-box',
+              padding: '0.6rem 0.75rem',
+              borderRadius: '0.5rem',
+              border: `1px solid ${colors.border}`,
+              background: colors.bg,
+              color: colors.text,
+            }}
+          />
+        )}
+      </div>
+
+      {errorMessage && <p style={{ margin: 0, fontSize: '0.8rem', color: colors.danger }}>{errorMessage}</p>}
+
+      <button onClick={onNext} style={primaryButtonStyle(true)}>
+        下一步：連結上傳
+      </button>
+      <button onClick={onBack} style={secondaryButtonStyle}>
+        返回錄音
+      </button>
+    </div>
+  )
+}
+
+/**
+ * 移送聯繫 — 掃 QR / 手動輸入 session id 並上傳連結（設計稿沒有這一步，
+ * 是這個 app 既有的功能，沿用同一套法庭視覺語彙）。
+ */
+function TopicStep({ choice, onChoiceChange, preset, onPresetChange, custom, onCustomChange, errorMessage, onBack, onNext }) {
+  const optionStyle = (active) => ({
+    ...cardStyle,
+    padding: '0.85rem 1rem',
+    textAlign: 'left',
+    cursor: 'pointer',
+    border: `1px solid ${active ? colors.accent : colors.border}`,
+    background: active ? 'rgba(99,102,241,0.12)' : colors.card,
+  })
+
+  return (
+    <div className="court-step transfer scroll">
+      <div className="warn mono">FINAL NOTICE</div>
+      <div className="tfTitle serif">移送聯繫</div>
+      <div className="tfBody">
+        <p>問卷與證詞都已備妥。最後一步:在主系統前掃描畫面上的移送代碼（或手動輸入）,把資料移送過去建立連結。</p>
+      </div>
+
+      <div style={optionStyle(choice === 'preset')} onClick={() => onChoiceChange('preset')}>
+        <strong>從預設議題中選一個</strong>
+        {choice === 'preset' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.6rem' }}>
+            {PRESET_TOPICS.map((t) => (
+              <button
+                key={t}
+                onClick={(e) => { e.stopPropagation(); onPresetChange(t) }}
+                style={{
+                  ...secondaryButtonStyle,
+                  textAlign: 'left',
+                  border: `1px solid ${preset === t ? colors.accent : colors.border}`,
+                  color: preset === t ? colors.text : colors.textMuted,
+                }}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={optionStyle(choice === 'custom')} onClick={() => onChoiceChange('custom')}>
+        <strong>自己輸入</strong>
+        {choice === 'custom' && (
+          <input
+            value={custom}
+            onChange={(e) => onCustomChange(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            placeholder="用一句話描述你的煩惱，例如「該不該離職去進修」"
+            style={{
+              marginTop: '0.6rem',
+              width: '100%',
+              boxSizing: 'border-box',
+              padding: '0.6rem 0.75rem',
+              borderRadius: '0.5rem',
+              border: `1px solid ${colors.border}`,
+              background: colors.bg,
+              color: colors.text,
+            }}
+          />
+        )}
+      </div>
+
+      {errorMessage && <p style={{ margin: 0, fontSize: '0.8rem', color: colors.danger }}>{errorMessage}</p>}
+
+      <button onClick={onNext} style={primaryButtonStyle(true)}>
+        下一步：連結上傳
+      </button>
+      <button onClick={onBack} style={secondaryButtonStyle}>
+        返回錄音
+      </button>
     </div>
   )
 }

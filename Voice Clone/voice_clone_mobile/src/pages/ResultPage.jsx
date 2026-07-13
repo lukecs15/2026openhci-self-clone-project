@@ -115,6 +115,7 @@ export default function ResultPage() {
 function ReadyView({ result }) {
   const signature = result.waveform_signature || FALLBACK_SIGNATURE
   const participantNames = (result.participant_agents || []).map((a) => a.display_name).filter(Boolean)
+  const verdict = result.verdict || null
 
   return (
     <div
@@ -124,9 +125,10 @@ function ReadyView({ result }) {
         background: colors.bg,
         display: 'flex',
         flexDirection: 'column',
+        overflowY: 'auto',
       }}
     >
-      <div style={{ position: 'absolute', inset: 0 }}>
+      <div style={{ position: 'fixed', inset: 0 }}>
         <WaveformAvatar signature={signature} isSpeaking currentText={result.summary_text} />
       </div>
 
@@ -134,16 +136,20 @@ function ReadyView({ result }) {
         style={{
           position: 'relative',
           zIndex: 1,
-          flex: 1,
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          justifyContent: 'center',
-          padding: '2rem',
+          justifyContent: verdict ? 'flex-start' : 'center',
+          minHeight: '100vh',
+          padding: '2rem 1.25rem 3rem',
           textAlign: 'center',
-          gap: '1.5rem',
+          gap: '1.25rem',
         }}
       >
+        {verdict && (
+          <VerdictDocument verdict={verdict} topicTitle={result.topic_title} />
+        )}
+
         <p
           style={{
             maxWidth: '420px',
@@ -154,15 +160,100 @@ function ReadyView({ result }) {
             margin: 0,
           }}
         >
-          {result.summary_text || '謝謝你今天願意敞開心分享。'}
+          {result.summary_text || verdict?.closing_line || '謝謝你今天願意敞開心分享。'}
         </p>
 
         {participantNames.length > 0 && (
           <p style={{ margin: 0, fontSize: '0.8rem', color: 'rgba(226,232,240,0.75)' }}>
-            這次一起參與的自我：{participantNames.join('、')}
+            這次出庭的自我：{participantNames.join('、')}
           </p>
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * VerdictDocument — 「內在法庭」判決書（對照後端 agents/debate.py 的
+ * generate_verdict() 欄位）。舊資料沒有 verdict 欄位時整段不顯示，
+ * ReadyView 退回原本「一句總結語 + 融合波形」的呈現。
+ */
+function VerdictDocument({ verdict, topicTitle }) {
+  const sectionTitleStyle = {
+    margin: '0 0 0.25rem',
+    fontSize: '0.72rem',
+    letterSpacing: '0.15em',
+    color: 'rgba(226,215,180,0.85)',
+  }
+  const sectionBodyStyle = {
+    margin: 0,
+    fontSize: '0.9rem',
+    lineHeight: 1.75,
+    color: 'rgba(248,250,252,0.92)',
+  }
+
+  return (
+    <div
+      style={{
+        width: '100%',
+        maxWidth: '440px',
+        textAlign: 'left',
+        background: 'rgba(10,12,20,0.78)',
+        border: '1px solid rgba(226,215,180,0.35)',
+        borderRadius: '0.9rem',
+        padding: '1.4rem 1.25rem',
+        backdropFilter: 'blur(6px)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '1rem',
+      }}
+    >
+      <div style={{ textAlign: 'center' }}>
+        <p style={{ margin: 0, fontSize: '1.05rem', letterSpacing: '0.25em', color: '#e8dcb4' }}>
+          心智最高法院 判決書
+        </p>
+        <p style={{ margin: '0.4rem 0 0', fontSize: '0.8rem', color: 'rgba(226,232,240,0.7)' }}>
+          {verdict.case_title || topicTitle || ''}
+        </p>
+      </div>
+
+      {verdict.initial_bias && (
+        <div>
+          <p style={sectionTitleStyle}>最初的成見</p>
+          <p style={sectionBodyStyle}>{verdict.initial_bias}</p>
+        </div>
+      )}
+
+      {(verdict.viewpoint_a || verdict.viewpoint_b) && (
+        <div>
+          <p style={sectionTitleStyle}>兩造主張</p>
+          {verdict.viewpoint_a && <p style={sectionBodyStyle}>・{verdict.viewpoint_a}</p>}
+          {verdict.viewpoint_b && <p style={sectionBodyStyle}>・{verdict.viewpoint_b}</p>}
+        </div>
+      )}
+
+      {Array.isArray(verdict.judge_interventions) && verdict.judge_interventions.length > 0 && (
+        <div>
+          <p style={sectionTitleStyle}>法官（你）的介入意見</p>
+          {verdict.judge_interventions.map((line, i) => (
+            <p key={i} style={sectionBodyStyle}>・{line}</p>
+          ))}
+        </div>
+      )}
+
+      {verdict.final_verdict && (
+        <div>
+          <p style={sectionTitleStyle}>本庭判決</p>
+          <p style={sectionBodyStyle}>{verdict.final_verdict}</p>
+        </div>
+      )}
+
+      {verdict.revised_belief && (
+        <div>
+          <p style={sectionTitleStyle}>修正後的信念</p>
+          <p style={{ ...sectionBodyStyle, color: '#c7e3ff' }}>{verdict.revised_belief}</p>
+        </div>
+      )}
     </div>
   )
 }

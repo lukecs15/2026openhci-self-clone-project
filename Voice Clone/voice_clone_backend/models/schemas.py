@@ -108,7 +108,16 @@ class BigFiveScores(BaseModel):
 class OnboardingResult(BaseModel):
     """體驗結束後要傳回手機的「紀念品」內容。"""
 
-    summary_text: str = Field("", description="LLM 生成的結束總結句子")
+    summary_text: str = Field("", description="LLM 生成的結束總結句子（判決書的結語，一句話）")
+    # 「內在法庭」判決書（見 agents/debate.py 的 generate_verdict()）：
+    #   { "case_title": 案由, "initial_bias": 當事人最初的成見,
+    #     "viewpoint_a": {...}, "viewpoint_b": {...},
+    #     "judge_interventions": [法官親口駁斥的意見...],
+    #     "final_verdict": 最終判決主文, "revised_belief": 修正後的信念,
+    #     "closing_line": 結語（同 summary_text）}
+    # 留空（None）向後相容：舊流程只有一句總結語時手機端照舊只顯示 summary_text。
+    verdict: Optional[dict] = Field(None, description="結構化判決書內容（內在法庭最終產物）")
+    topic_title: str = Field("", description="這場辯論的議題（判決書案由顯示用）")
     waveform_signature: Optional[dict] = Field(
         None, description="融合波形（mergeWaveformSignatures() 的結果，供手機端渲染紀念畫面）"
     )
@@ -126,6 +135,9 @@ class OnboardingSession(BaseModel):
         "linked", description="linked：問卷+聲音已上傳，5 位 agent 已生成；completed：體驗結束，結果已寫回"
     )
     big_five_scores: BigFiveScores
+    # 使用者想討論的議題（手機端輸入/選擇，或後端從聲音樣本逐字稿推導），
+    # 主系統（Unity）載入後帶進辯論模式的 init_debate_session（topic_title）。
+    topic_title: str = Field("", description="這場體驗要辯論的議題標題")
     voice_profile_id: str = Field("", description="這場對話使用的聲音克隆 profile id")
     agents: list[AgentConfig] = Field(default_factory=list, description="依 Big Five 分數生成的 5 位自我 agent")
     result: Optional[OnboardingResult] = Field(None, description="體驗結束後回寫的總結與融合波形")
@@ -308,6 +320,7 @@ class ServerMessage(BaseModel):
 #     "agents": [AgentConfig, AgentConfig] }   # 恰好 2 位，第一位先開口
 #   { "type": "pause_debate" }                 # 立刻中斷目前正在生成/播放的那句話
 #   { "type": "user_intervene", "text": "..." }  # 插話（通常在 pause_debate 之後送出）
+#   { "type": "user_intervene_audio", "audio": "<base64 WAV/PCM>" }  # 插話（語音版，見下方說明）
 #   { "type": "turn_played", "agent_id": "..." }  # 前端回報這一輪的音訊/朗讀真的播完了
 #   { "type": "end_session" }
 #
@@ -317,6 +330,9 @@ class ServerMessage(BaseModel):
 #   { "type": "agent_speaking_chunk", "agent_id": "...", "text": "...", "audio": "<base64>" }
 #   { "type": "agent_speaking_end", "agent_id": "..." }
 #   { "type": "debate_paused", "agent_id": "..." }   # 暫停成功，該 agent 的生成已中斷
+#   { "type": "user_transcript", "text": "...", "engine_used": "...", "used_fallback": bool }
+#       # 只有 user_intervene_audio 才會送這個事件（先回報辨識出的文字，讓前端可以
+#       # 顯示「聽到了什麼」），緊接著才會送 user_intervene_ack。
 #   { "type": "user_intervene_ack", "text": "..." }  # 插話已記錄，即將由暫停的 agent 接續回應
 #   { "type": "debate_finished" }                    # 達到 debate_max_turns 上限，自然結束
 #   { "type": "session_summary", "text": "..." }      # end_session 收到後，關閉連線前送出的總結紀念語
@@ -324,9 +340,30 @@ class ServerMessage(BaseModel):
 #
 # turn_played 是修過的真實回報問題：插話後接續回應的不是被打斷的那位 agent，
 # 見 routers/ws_debate.py 檔案開頭「等待前端回報播放完成」的說明。
+#
+# ── user_intervene_audio（VR 版新增，見 voice_clone_unity 系統設計文件）─────
+# 網頁版辯論模式原本設計上「刻意」只吃文字插話（見 agents/debate.py 檔案
+# 開頭說明：辯論模式不需要 STT，靠瀏覽器 Web Speech API 就地轉文字）。VR
+# 版的使用者（法官）配戴頭顯手持法槌，敲下法槌後用「說話」插話比打字更
+# 符合沉浸式體驗，但 VR 端沒有瀏覽器可以用 Web Speech API，因此新增這個
+# 訊息類型，直接重用後端既有的 STTService 雙引擎（faster-whisper／
+# Breeze ASR）架構（跟一般多 Agent 對話 `user_audio` 走的是同一顆
+# get_stt_service() 單例，見 pipeline/debate_pipeline.py 的
+# `DebateSession.transcribe_intervention_audio()`）。收到這個訊息後，
+# 後端會：先呼叫 STT 轉錄、送出 `user_transcript` 讓前端知道辨識結果，
+# 再照跟 `user_intervene` 完全相同的流程（取消背景生成 task → 記錄進歷史
+# → 送 `user_intervene_ack` → 重新啟動背景生成 task）處理，前端不需要
+# 額外處理兩種插話方式的差異，文字/語音插話最終都收斂成同一條路徑。
+# 網頁版前端目前不使用這個訊息類型（仍走純文字 `user_intervene`），是
+# VR 版專屬的擴充，向後相容、不影響既有網頁版行為。
 
 DebateClientMessageType = Literal[
-    "init_debate_session", "pause_debate", "user_intervene", "turn_played", "end_session"
+    "init_debate_session",
+    "pause_debate",
+    "user_intervene",
+    "user_intervene_audio",
+    "turn_played",
+    "end_session",
 ]
 DebateServerMessageType = Literal[
     "debate_ready",
@@ -334,6 +371,7 @@ DebateServerMessageType = Literal[
     "agent_speaking_chunk",
     "agent_speaking_end",
     "debate_paused",
+    "user_transcript",
     "user_intervene_ack",
     "debate_finished",
     "session_summary",
@@ -346,11 +384,19 @@ class DebateClientMessage(BaseModel):
 
     type: DebateClientMessageType
     topic_id: Optional[str] = None
+    # topic_id == "custom" 時使用：自訂議題標題（例如手機 onboarding 傳來的
+    # 使用者煩惱），後端用 agents/debate.py 的 build_custom_topic() 動態組出
+    # DebateTopic，不需要事先存在 DEFAULT_DEBATE_TOPICS。
+    topic_title: Optional[str] = None
     agents: Optional[list[AgentConfig]] = None
     text: Optional[str] = None
     # 只有 turn_played 會帶：前端回報「這一輪播放完成」的 agent_id，純粹供
     # 後端 log/除錯用，等待機制本身只需要「有沒有收到訊號」，不需要比對值。
     agent_id: Optional[str] = None
+    # 只有 user_intervene_audio 會帶：使用者插話的錄音（base64 WAV/PCM，
+    # 格式跟一般多 Agent 對話的 user_audio 相同，交給同一套 STTService
+    # 處理，見上方「user_intervene_audio」說明）。
+    audio: Optional[str] = None
 
 
 class DebateServerMessage(BaseModel):
@@ -371,3 +417,6 @@ class DebateServerMessage(BaseModel):
     text: Optional[str] = None
     audio: Optional[str] = None  # base64
     message: Optional[str] = None
+    # 只有 user_transcript 事件會帶（見「user_intervene_audio」說明）。
+    engine_used: Optional[str] = None
+    used_fallback: Optional[bool] = None

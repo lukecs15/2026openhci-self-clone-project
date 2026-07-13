@@ -37,13 +37,16 @@ async function readErrorDetail(res) {
  * @param {string} sessionId
  * @param {Record<string, number>} bigFiveScores 五個向度 0~100 的分數
  * @param {Blob} audioBlob 錄好的聲音樣本
+ * @param {string} [topic] 想討論的議題標題；留空時後端會從錄音逐字稿自動推導
+ *   （見後端 services/topic_derivation.py）
  * @param {string} [label] 聲音克隆 profile 顯示名稱
- * @returns {Promise<object>} 後端回傳的 OnboardingSession（含 agents）
+ * @returns {Promise<object>} 後端回傳的 OnboardingSession（含 agents 與 topic_title）
  */
-export async function linkOnboardingSession(sessionId, bigFiveScores, audioBlob, label = '我的聲音') {
+export async function linkOnboardingSession(sessionId, bigFiveScores, audioBlob, topic = '', label = '我的聲音') {
   const form = new FormData()
   form.append('big_five', JSON.stringify(bigFiveScores))
   form.append('label', label)
+  form.append('topic', topic || '')
   form.append('file', audioBlob, 'sample.webm')
 
   const res = await fetch(`${API_BASE_URL}/onboarding-sessions/${sessionId}/link`, {

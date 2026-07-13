@@ -193,20 +193,42 @@ class MockLLMService(LLMService):
     # 像總結的鼓勵語，而不是每次都吐出跟一般回覆一樣的測試句子）。
     DEFAULT_SUMMARY_REPLY = "願你把今天說出口的每一句話，都當作送給未來自己的一份禮物。"
 
+    # agents/debate.py 的 generate_verdict() 固定用 agent_id="verdict" 呼叫，
+    # 期待回傳「內在法庭判決書」JSON（欄位見該檔案的
+    # _DEBATE_VERDICT_SYSTEM_PROMPT_TEMPLATE）。這裡回傳一份合法的固定 JSON，
+    # 讓沒接真實 LLM 的開發環境也能看到完整的判決書結束畫面。
+    DEFAULT_VERDICT_REPLY = (
+        '{"case_title": "當事人內心兩種聲音之嚴重內耗案", '
+        '"initial_bias": "當事人原先認定這個煩惱只有單一正確答案。", '
+        '"viewpoint_a": "甲方主張應以務實步驟立即行動。", '
+        '"viewpoint_b": "乙方主張應先照顧感受、接納自己的步調。", '
+        '"judge_interventions": ["法官指出兩造皆忽略了實際情境的限制。"], '
+        '"final_verdict": "本庭裁定：兩種聲音皆為當事人真實的一部分，行動與接納並行不悖。", '
+        '"revised_belief": "我可以一邊接納情緒，一邊採取小步驟的行動。", '
+        '"closing_line": "願你帶著今天的判決，溫柔而堅定地繼續前行。"}'
+    )
+
     def __init__(
         self,
         scripted_reply: str = "你好，很高興認識你！這是一段測試回覆。",
         summary_reply: str = DEFAULT_SUMMARY_REPLY,
+        verdict_reply: str = DEFAULT_VERDICT_REPLY,
     ):
         self._scripted_reply = scripted_reply
         self._summary_reply = summary_reply
+        self._verdict_reply = verdict_reply
 
     async def stream_reply(
         self, agent_id: str, system_prompt: str, messages: list[dict]
     ) -> AsyncIterator[LLMTextChunk]:
         import asyncio
 
-        reply = self._summary_reply if agent_id == "summary" else self._scripted_reply
+        if agent_id == "summary":
+            reply = self._summary_reply
+        elif agent_id == "verdict":
+            reply = self._verdict_reply
+        else:
+            reply = self._scripted_reply
         for ch in reply:
             await asyncio.sleep(0)
             yield LLMTextChunk(agent_id=agent_id, delta_text=ch)

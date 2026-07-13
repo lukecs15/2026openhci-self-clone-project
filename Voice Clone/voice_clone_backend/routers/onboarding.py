@@ -64,6 +64,13 @@ async def link_onboarding_session(
     session_id: str,
     big_five: str = Form(..., description="BigFiveScores 的 JSON 字串"),
     label: str = Form("我的聲音", description="聲音克隆 profile 顯示名稱"),
+    topic: str = Form(
+        "",
+        description=(
+            "使用者想討論的議題標題（手機端輸入或從預設清單選擇）。留空時後端"
+            "會從聲音樣本的 STT 逐字稿用 LLM 推導（見 services/topic_derivation.py）"
+        ),
+    ),
     file: UploadFile = File(..., description="Big Five 問卷開始前錄的聲音樣本，WAV/WebM 等音訊檔"),
 ):
     settings = get_settings()
@@ -101,12 +108,24 @@ async def link_onboarding_session(
         voice_profile_id=voice_profile.profile_id,
     )
 
+    # 議題：手機端有明確傳就直接用；留空則從聲音樣本逐字稿推導（best
+    # effort，失敗回退預設議題，不會擋住 link 流程）。
+    topic_title = topic.strip()
+    if not topic_title:
+        from pipeline.conversation_pipeline import _resolve_default_llm_service
+        from services.topic_derivation import derive_topic_title
+
+        topic_title = await derive_topic_title(
+            voice_profile.reference_text, _resolve_default_llm_service(settings)
+        )
+
     try:
         session = get_onboarding_session_service().link_session(
             session_id=session_id,
             big_five_scores=scores,
             voice_profile_id=voice_profile.profile_id,
             agents=agents,
+            topic_title=topic_title,
         )
     except OnboardingSessionAlreadyLinkedError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))

@@ -77,6 +77,15 @@ agent，插話後接續回應的自然就對不上使用者的預期。
 因此從 `voice_debate_endpoint` 裡的 closure 抽成模組層級函式，方便直接
 用真正的 `DebateOrchestrator`（`max_turns=1`）單元測試「最後一輪也會
 等 ack」這個修過的行為（見 tests/test_ws_debate.py）。
+
+── user_intervene_audio（VR 版新增）─────────────────────────────────────
+網頁版插話刻意只吃文字（見 agents/debate.py 檔案開頭說明）。VR 版
+（voice_clone_unity）的使用者敲法槌插話改用語音，這裡新增
+`user_intervene_audio` 訊息類型：先呼叫 `session.transcribe_intervention_
+audio()`（見 pipeline/debate_pipeline.py，重用既有 STTService 雙引擎
+架構）送出 `user_transcript` 事件，辨識到非空文字才會照跟 `user_intervene`
+完全相同的流程繼續（取消背景 task → inject_user_message → ack →
+重啟背景 task）。完整協定說明見 models/schemas.py 底部。
 """
 
 from __future__ import annotations
@@ -89,7 +98,7 @@ from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from agents.debate import DEFAULT_DEBATE_TOPICS, DebateOrchestrator
+from agents.debate import DEFAULT_DEBATE_TOPICS, DebateOrchestrator, build_custom_topic
 from models.schemas import AgentConfig, DebateClientMessage
 from pipeline.debate_pipeline import DebateSession, build_debate_session
 
@@ -218,7 +227,15 @@ async def voice_debate_endpoint(ws: WebSocket, session_id: str):
                 continue
 
             if msg.type == "init_debate_session":
-                topic = DEFAULT_DEBATE_TOPICS.get(msg.topic_id or "")
+                # 自訂議題（VR/手機 onboarding 流程）：topic_id="custom" +
+                # topic_title 動態組出主題；topic_id 不在預設清單但有帶
+                # topic_title 時也視為自訂議題（呼叫端漏寫 "custom" 的防呆）。
+                if msg.topic_id == "custom" or (
+                    msg.topic_id not in DEFAULT_DEBATE_TOPICS and msg.topic_title
+                ):
+                    topic = build_custom_topic(msg.topic_title or "")
+                else:
+                    topic = DEFAULT_DEBATE_TOPICS.get(msg.topic_id or "")
                 agents: list[AgentConfig] = msg.agents or []
                 if topic is None:
                     await _send(ws, {"type": "error", "message": f"未知的辯論主題：{msg.topic_id}"})
@@ -262,6 +279,35 @@ async def voice_debate_endpoint(ws: WebSocket, session_id: str):
                     _run_debate_loop(session.orchestrator, event_queue, turn_ack_event)
                 )
 
+            elif msg.type == "user_intervene_audio":
+                # VR 語音插話（見 models/schemas.py「user_intervene_audio」
+                # 說明）：先轉錄、送 user_transcript 讓前端知道辨識結果，
+                # 再走跟 user_intervene 完全相同的流程。轉錄失敗（STT primary
+                # 與 fallback 皆逾時/例外，見 services/stt_service.py）只回報
+                # error，不取消目前背景 task、不當作插話送出——使用者可以
+                # 再敲一次法槌重試，不會因為一次辨識失敗就打斷正在進行的辯論。
+                if session is None or not msg.audio:
+                    await _send(ws, {"type": "error", "message": "尚未 init_debate_session 或缺少 audio"})
+                    continue
+                audio_bytes = base64.b64decode(msg.audio)
+                try:
+                    transcript_event = await session.transcribe_intervention_audio(audio_bytes)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("辯論模式插話語音辨識失敗：%s", exc)
+                    await _send(ws, {"type": "error", "message": f"語音辨識失敗：{exc}"})
+                    continue
+                await _send(ws, transcript_event)
+                intervene_text = (transcript_event.get("text") or "").strip()
+                if not intervene_text:
+                    await _send(ws, {"type": "error", "message": "沒有辨識到任何內容，請再說一次"})
+                    continue
+                await _cancel_debate_task()
+                session.orchestrator.inject_user_message(intervene_text)
+                await _send(ws, {"type": "user_intervene_ack", "text": intervene_text})
+                debate_task = asyncio.create_task(
+                    _run_debate_loop(session.orchestrator, event_queue, turn_ack_event)
+                )
+
             elif msg.type == "turn_played":
                 # 見檔案開頭「等待前端回報播放完成」說明；沒有 session/還沒
                 # 開始討論時收到這則訊息不需要視為錯誤，安靜忽略即可（例如
@@ -277,11 +323,27 @@ async def voice_debate_endpoint(ws: WebSocket, session_id: str):
                 #      不需要另外處理「task 還在跑」的情況。
                 await _cancel_debate_task()
                 if session is not None:
+                    # 「內在法庭」判決書為主要產物（見 agents/debate.py 的
+                    # generate_verdict()），text 欄位帶結語一句話，向後相容
+                    # 只讀 text 的既有前端；verdict 欄位給 Unity 判決書面板
+                    # 與手機 ResultPage 使用。
                     try:
-                        summary_text = await session.generate_summary()
-                        await _send(ws, {"type": "session_summary", "text": summary_text})
+                        verdict = await session.generate_verdict()
+                        await _send(
+                            ws,
+                            {
+                                "type": "session_summary",
+                                "text": verdict.get("closing_line", ""),
+                                "verdict": verdict,
+                            },
+                        )
                     except Exception as exc:  # noqa: BLE001
-                        logger.warning("生成結束總結失敗，略過：%s", exc)
+                        logger.warning("生成判決書失敗，改用一句總結語：%s", exc)
+                        try:
+                            summary_text = await session.generate_summary()
+                            await _send(ws, {"type": "session_summary", "text": summary_text})
+                        except Exception as exc2:  # noqa: BLE001
+                            logger.warning("生成結束總結失敗，略過：%s", exc2)
                 break
 
     except WebSocketDisconnect:
