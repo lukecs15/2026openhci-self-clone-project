@@ -1,13 +1,11 @@
 /**
  * CourtMicVisualizer.jsx — 口述證詞畫面的錄音波形（canvas，真實麥克風音量驅動）
  *
- * 逐邏輯從設計稿 inner-court-survey-fix8.html 的 drawMic() 搬過來（見該檔案
- * 「═══ 口述證詞 ═══」段落）。錄音中：用 AnalyserNode 讀取即時波形資料，
- * 先畫一條「永遠都在」的單色真實波形，再用 RMS（均方根）音量判斷這一幀有
- * 沒有聲音——有聲音時，另外疊加五條 OCEAN 代表色的波紋（各自加一點相位/
- * 頻率偏移，跟真實波形交錯流動），音量降到接近無聲時五色波紋會自動淡出，
- * 只留單色線條；沒在錄音時，畫一條待機用的靜態合成波（沿用跟審訊畫面同一
- * 套 waveAt() 波形函式）。
+ * 逐邏輯從最新設計稿「內在法庭_手機問卷 (4).html」的 drawMic() 搬過來。
+ * 這是 v2 改版：v1（inner-court-survey-fix8.html）版本錄音中會用 RMS 音量
+ * 判斷有沒有聲音，有聲音才疊加五條 OCEAN 代表色的交錯波紋；v2 把這個效果
+ * 整個拿掉，錄音中只畫一條單色真實波形（更克制、雜訊更少），待機時的合成波
+ * 邏輯不變。這裡逐式對照過新版原始碼，不是自己簡化的。
  *
  * @param {{ analyserNode: AnalyserNode|null, recording: boolean }} props
  *   analyserNode 由呼叫端（pages/OnboardingFlow.jsx 的 startRecording）在
@@ -16,14 +14,12 @@
  *   分離。
  */
 import { useEffect, useRef } from 'react'
-import { DIMS } from '../data/oceanDims'
-import { TAU, hsb, lerp, waveAt, fitCanvas } from '../utils/courtVisuals'
+import { TAU, fitCanvas } from '../utils/courtVisuals'
 
 export default function CourtMicVisualizer({ analyserNode, recording }) {
   const canvasRef = useRef(null)
   const rafIdRef = useRef(null)
   const startTimeRef = useRef(null)
-  const micPresenceRef = useRef(0)
   const dataArrayRef = useRef(null)
 
   useEffect(() => {
@@ -45,49 +41,19 @@ export default function CourtMicVisualizer({ analyserNode, recording }) {
           analyserNode.getByteTimeDomainData(data)
           const n = data.length
 
-          let sumSq = 0
-          for (let i = 0; i < n; i += 1) {
-            const v = (data[i] - 128) / 128
-            sumSq += v * v
-          }
-          const rms = Math.sqrt(sumSq / n)
-          const hasSound = rms > 0.035
-          micPresenceRef.current = lerp(micPresenceRef.current, hasSound ? 1 : 0, hasSound ? 0.16 : 0.05)
-          const micPresence = micPresenceRef.current
-
+          ctx.strokeStyle = 'rgba(24,28,38,.85)'
           ctx.lineWidth = 1.4
-          ctx.strokeStyle = 'rgba(24,28,38,.55)'
           ctx.beginPath()
           for (let i = 0; i < n; i += 1) {
-            const xn = i / (n - 1)
-            const raw = (data[i] - 128) / 128
-            const y = H / 2 + raw * 0.34 * H
-            const x = xn * W
+            const x = (i / (n - 1)) * W
+            const y = H / 2 + ((data[i] - 128) / 128) * H * 0.42
             if (i === 0) ctx.moveTo(x, y)
             else ctx.lineTo(x, y)
           }
           ctx.stroke()
-
-          if (micPresence > 0.01) {
-            DIMS.forEach((dim, d) => {
-              const weavePhase = d * 1.3
-              ctx.lineWidth = 1.2
-              ctx.strokeStyle = hsb(dim.hue, 58, 68, 0.78 * micPresence)
-              ctx.beginPath()
-              for (let i = 0; i < n; i += 1) {
-                const xn = i / (n - 1)
-                const raw = (data[i] - 128) / 128
-                const weave = Math.sin(xn * TAU * (1.6 + d * 0.35) + t * 1.4 + weavePhase) * 0.1 * micPresence
-                const y = H / 2 + (raw * 0.34 + weave) * H
-                const x = xn * W
-                if (i === 0) ctx.moveTo(x, y)
-                else ctx.lineTo(x, y)
-              }
-              ctx.stroke()
-            })
-          }
         } else {
-          micPresenceRef.current = 0
+          // 待機:合成波細線（跟審訊畫面同一套 waveAt() 波形函式概念相通，
+          // 這裡沿用設計稿直接寫死的簡化雙正弦波，不是完整 waveAt()）。
           ctx.strokeStyle = 'rgba(24,28,38,.35)'
           ctx.lineWidth = 1
           ctx.beginPath()

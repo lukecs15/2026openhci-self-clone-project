@@ -1,28 +1,76 @@
 /**
- * court.css — 「心智最高法院」法庭審訊主題（使用者提供的設計稿
- * inner-court-survey-fix8.html 移植過來，套用到 pages/OnboardingFlow.jsx）。
+ * court.css — 「心智最高法院」法庭審訊主題 v2（使用者提供的最新設計稿
+ * 「內在法庭_手機問卷 (4).html」移植過來，套用到 pages/OnboardingFlow.jsx）。
  *
- * 移植說明：
- *   - 顏色 token、字體、所有 CSS keyframes 動畫（stamp／fadeDown／
- *     bodyFadeUp／sealIn／qIn／ansFlash／bob／nod／deepnod／shake／write／
- *     hop／hintPulse／recPulse）都是逐字從設計稿的 <style> 搬過來，數值
- *     沒有更動，維持原本的節奏與手感。
- *   - 整份樣式表刻意包在 `.court-app` 這個外層 class 底下（設計稿原本是
- *     整份 body 都套用），因為手機端 App 裡還有 pages/ResultPage.jsx
- *     （體驗結束後的紀念畫面）維持原本的深色宇宙感主題，不屬於這次法庭
- *     視覺改版的範圍，不能讓這份法庭主題的樣式漏出去影響到它。
- *   - 設計稿用「所有畫面（section）常駐 DOM、用 .on/.leaving 切換
- *     display/opacity」做轉場；這裡的 React 版本沿用既有 OnboardingFlow.jsx
- *     的條件渲染（一次只掛載一個步驟的 DOM），改用簡單的進場動畫
- *     （.court-step-enter）取代原本「舊畫面淡出、新畫面疊上層」的雙層轉場，
- *     這是配合既有 state machine 架構的簡化，不影響任何功能。
- *   - 開場（opening）畫面設計稿是用上萬個手繪座標點即時畫出品牌標準字的
- *     產生藝術動畫，資料量太大（單一素材超過 8 萬字元），這裡改用「同一套
- *     配色/字體/節奏」但輕量許多的簡化版開場（見 components/CourtOpening.jsx
- *     的說明），不是逐字素材移植——這是唯一刻意簡化、沒有 1:1 照搬的部分。
+ * 這是第二版設計稿的移植（第一版是 inner-court-survey-fix8.html，已經套用
+ * 過一次）。跟第一版比對後，這次是大改版，不是小修：
+ *   - 字體系統整個換掉：內嵌思源柔黑(GenJyuuGothic 400/700)、jf open 粉圓
+ *     (OpenHuninn)、霞鶩文楷 TC(LXGWWenKaiTC)三款開源字型（設計稿原本是
+ *     base64 內嵌在 <style> 裡，這裡改成存成 public/fonts/*.woff2 靜態檔案
+ *     用 url() 引用——inline base64 塞進原始碼會讓這份 CSS 膨脹到超過
+ *     1MB，對 Vite 專案完全不合理，效果跟設計稿的 base64 版本完全一樣，
+ *     只是資產存放方式改成更適合前端建置流程的做法）。
+ *   - 電子傳票整個改成「公文格式」：檔號/保存年限、雙線、受文者/發文日期/
+ *     發文字號/速別欄位、印章改用 mix-blend-mode:multiply 疊在紙上、正本/
+ *     副本/機關具名。
+ *   - 新增 bgWash：五顆 OCEAN 粉彩色斑在傳票/審訊畫面背景緩慢漂移+閃爍。
+ *   - 所有按鈕/答案選項統一「玻璃砂質感」：backdrop-filter 毛玻璃 + SVG
+ *     turbulence 雜訊紋理疊加。
+ *   - 開場畫面背景從紙白改成 85% 灰（配合 components/CourtOpening.jsx 新增
+ *     的 Netflix 式鏡頭衝出+白光轉場結局）。
+ *   - 答對選項的 flash 回饋顏色改成由 JS 依「當前題目所屬向度」動態注入
+ *     （--fc / --fcSoft 自訂屬性），不再是固定的暗紅色。
+ *   - 移除了不少舊版的獨立進場動畫（courtHeader 的 fadeDown、summonsBody
+ *     段落的 bodyFadeUp、審訊題目泡泡切換的 qIn、答案選項按下的彈簧
+ *     transform、口供錄音鈕的 recPulse 呼吸光暈）——新版走更克制、更少
+ *     裝飾動作的路線，這裡逐一比對後拿掉，不是漏做。
+ *
+ * 沿用第一版就有的既有安排（這次沒變，不重複解釋細節）：
+ *   - 整份樣式表包在 `.court-app` 外層 class 底下，避免漏出去影響
+ *     pages/ResultPage.jsx 的深色宇宙感主題（唯一例外是 @font-face 這種
+ *     全域 at-rule，寫在哪裡都是全域生效，不受 class 範圍限制，但它本身
+ *     只是註冊字型可用性，不會直接畫出任何東西，只有被 font-family 引用
+ *     時才生效，而 font-family 的引用全部都在 `.court-app` 範圍內）。
+ *   - React 版用條件渲染取代設計稿「所有畫面常駐 DOM + on/leaving 切換」
+ *     的做法，用 courtStepIn 簡單進場動畫取代雙層轉場。
+ *   - 開場畫面標準字仍是簡化版動畫邏輯之外，唯一沒有逐一比對到位的部分
+ *     是設計稿裡的付費字體「金萱」——--font-title 第一格保留
+ *     "jf-jinxuan"（未安裝時瀏覽器會自動略過，退回下一個開源字型
+ *     LXGWWenKaiTC 霞鶩文楷，這也是設計稿註解本來就設計好的退場機制）。
  */
 
+/* @font-face 是全域 at-rule，即使整份檔案的其他規則都刻意 scope 在
+   .court-app 底下，字型註冊本身還是得寫在最外層——這不影響「不外漏」的
+   目標，因為字型只是「登記可用」，實際套用字型的 font-family 宣告全部
+   都在 .court-app 範圍內（見下方），ResultPage.jsx 不會用到這些字族。 */
+@font-face {
+  font-family: 'GenJyuuGothic';
+  font-weight: 400; font-style: normal; font-display: swap;
+  src: url('/fonts/GenJyuuGothic-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'GenJyuuGothic';
+  font-weight: 700; font-style: normal; font-display: swap;
+  src: url('/fonts/GenJyuuGothic-700.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'OpenHuninn';
+  font-weight: 400; font-style: normal; font-display: swap;
+  src: url('/fonts/OpenHuninn-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'LXGWWenKaiTC';
+  font-weight: 400; font-style: normal; font-display: swap;
+  src: url('/fonts/LXGWWenKaiTC-400.woff2') format('woff2');
+}
+
 .court-app {
+  /* ── 字體系統 ──
+     標題:金萱(付費授權)。購買 justfont webfont 後，把授權字族名填進
+     --font-title 第一格（例如 "jf-jinxuan-medium"）；未授權時退回粉圓。 */
+  --font-title: "jf-jinxuan", "LXGWWenKaiTC", "OpenHuninn", "GenJyuuGothic", sans-serif; /* 金萱替代:霞鶩文楷(楷體=公文法定字體血統) */
+  --font-ui: "GenJyuuGothic", "Noto Sans TC", -apple-system, sans-serif; /* 思源柔黑 = Noto Sans TC 的圓角衍生 */
+  --font-result: "OpenHuninn", "GenJyuuGothic", sans-serif; /* jf open 粉圓 */
   --bg: #f2f3f5;
   --ink: rgba(24, 28, 38, .92);
   --ink-dim: rgba(24, 28, 38, .52);
@@ -38,7 +86,7 @@
   inset: 0;
   background: var(--bg);
   color: var(--ink);
-  font: 15px/1.7 "Noto Sans TC", -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif;
+  font: 15px/1.7 var(--font-ui);
   overflow: hidden;
   overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;
@@ -47,8 +95,8 @@
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
 }
-.court-app .serif { font-family: "Noto Serif TC", "Songti TC", serif; }
-.court-app .mono { font-family: "SF Mono", ui-monospace, monospace; letter-spacing: .08em; }
+.court-app .serif { font-family: var(--font-title); } /* 標題:金萱(授權後生效)→ 粉圓 → 柔黑 */
+.court-app .mono { font-family: "GenJyuuGothic", ui-monospace, monospace; letter-spacing: .08em; }
 
 .court-app .court-step {
   position: absolute;
@@ -61,55 +109,84 @@
 @keyframes courtStepIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
 /* ── 開場 ─────────────────────────────────────────────── */
-.court-app .opening { align-items: center; justify-content: center; background: var(--bg); }
+/* 85% 灰底(不是紙白):配合 CourtOpening.jsx 新增的 Netflix 式鏡頭衝出+
+   白光轉場結局，深底才襯得出「暗轉亮」的爆閃高潮。 */
+.court-app .opening { align-items: center; justify-content: center; background: #262626; }
 .court-app .openCanvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .court-app .openHint {
   position: absolute; bottom: calc(28px + env(safe-area-inset-bottom));
   left: 0; right: 0; text-align: center; font-size: 12px; letter-spacing: .4em;
-  text-indent: .4em; color: var(--ink-dim); pointer-events: none;
+  text-indent: .4em; color: rgba(245,246,250,.6); pointer-events: none;
   animation: hintPulse 2.2s ease-in-out infinite;
 }
 @keyframes hintPulse { 0%, 100% { opacity: .35; } 50% { opacity: .9; } }
 
-/* ── 1|電子傳票 ─────────────────────────────────────────── */
-.court-app .summons { align-items: center; justify-content: flex-start; padding: max(32px, 6vh) 24px 32px; }
-.court-app .courtHeader { text-align: center; margin-bottom: 20px; animation: fadeDown .6s ease-out both; }
-@keyframes fadeDown { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
-.court-app .courtHeader .rule { width: 60px; height: 1px; background: rgba(24,28,38,.4); margin: 0 auto 12px; }
-.court-app .courtHeader .courtName { font-size: 13px; letter-spacing: .55em; text-indent: .55em; color: var(--ink-dim); }
-.court-app .summonsCard {
-  width: min(88vw, 420px); border: 1px solid var(--hair); border-radius: 10px;
-  padding: 26px 24px 22px; background: rgba(255,255,255,.72);
+/* ── 1|電子傳票(公文格式) ─────────────────────────────── */
+.court-app .summons { align-items: center; justify-content: flex-start; padding: max(28px, 5vh) 20px calc(36px + env(safe-area-inset-bottom)); }
+.court-app .doc {
+  position: relative; width: min(90vw, 440px);
+  background: #fdfdfc; border: 1px solid rgba(24,28,38,.35); border-radius: 3px;
+  padding: 46px 26px 22px; box-shadow: 0 2px 18px rgba(24,28,38,.1);
   animation: stamp .55s cubic-bezier(.2, 1.4, .4, 1) both;
-  position: relative;
 }
-@keyframes stamp { from { transform: scale(1.25) rotate(-3deg); opacity: 0; } to { transform: none; opacity: 1; } }
-.court-app .court { text-align: center; font-size: 12px; letter-spacing: .5em; text-indent: .5em; color: var(--ink-dim); }
-.court-app .summonsTitle { text-align: center; font-size: 26px; letter-spacing: .3em; text-indent: .3em; margin: 6px 0 14px; }
-.court-app .caseNo { text-align: center; font-size: 11px; color: var(--ink-dim); margin-bottom: 16px; }
-.court-app .summonsBody { font-size: 13.5px; color: rgba(24,28,38,.75); }
-.court-app .summonsBody p + p { margin-top: 10px; }
-.court-app .summonsBody p { opacity: 0; animation: bodyFadeUp .5s cubic-bezier(.22,.61,.36,1) both; }
-.court-app .summonsBody p:nth-child(1) { animation-delay: .3s; }
-.court-app .summonsBody p:nth-child(2) { animation-delay: .42s; }
-@keyframes bodyFadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes stamp { from { transform: scale(1.22) rotate(-2.5deg); opacity: 0; } to { transform: none; opacity: 1; } }
+.court-app .docMeta {
+  position: absolute; top: 12px; left: 14px; font-size: 9px; line-height: 1.7;
+  color: rgba(24,28,38,.6); border: 1px solid rgba(24,28,38,.3); padding: 4px 8px;
+}
+.court-app .docCourt { text-align: center; font-size: 21px; letter-spacing: .42em; text-indent: .42em; }
+.court-app .docRule { width: 100%; height: 0; border-top: 2.5px solid rgba(24,28,38,.75); border-bottom: 1px solid rgba(24,28,38,.75); padding-top: 2px; margin: 10px 0 12px; } /* 公文雙線 */
+.court-app .docTitle { text-align: center; font-size: 16.5px; letter-spacing: .3em; text-indent: .3em; margin-bottom: 16px; }
+.court-app .docFields { position: relative; font-size: 12.5px; line-height: 2.05; color: rgba(24,28,38,.85); border-bottom: 1px solid rgba(24,28,38,.2); padding-bottom: 10px; margin-bottom: 12px; }
+.court-app .docBody { font-size: 13.5px; line-height: 2.0; color: rgba(24,28,38,.9); }
+.court-app .docBody p + p { margin-top: 6px; }
+.court-app .docBody .li { padding-left: 2.6em; text-indent: -2.6em; }
+.court-app .docFoot { margin-top: 20px; border-top: 1px solid rgba(24,28,38,.2); padding-top: 10px; }
+.court-app .docCopy { font-size: 10px; color: rgba(24,28,38,.55); }
+.court-app .docOrg { position: relative; text-align: right; font-size: 15px; letter-spacing: .18em; margin-top: 10px; padding-right: 6px; }
 .court-app .seal {
-  position: absolute; right: 18px; top: 14px; width: 58px; height: 58px;
-  border: 2px solid var(--seal); border-radius: 50%; color: var(--seal);
-  display: grid; place-items: center; font-size: 12px; letter-spacing: .15em;
-  transform: rotate(12deg); opacity: 0; animation: sealIn .3s .5s ease-out both;
+  position: absolute; right: 10px; top: 50%; width: 60px; height: 60px;
+  margin-top: -34px; /* 垂直置中(印章高的一半 + 微調) */
+  border: 2.5px solid var(--seal); border-radius: 50%; color: var(--seal);
+  display: grid; place-items: center; font-size: 13.5px; letter-spacing: .15em;
+  transform: rotate(11deg); opacity: 0; animation: sealIn .3s .55s ease-out both;
+  mix-blend-mode: multiply; /* 印泥壓在紙上的感覺 */
 }
-@keyframes sealIn { from { transform: rotate(12deg) scale(2.2); opacity: 0; } to { transform: rotate(12deg) scale(1); opacity: .9; } }
+@keyframes sealIn { from { transform: rotate(11deg) scale(2.1); opacity: 0; } to { transform: rotate(11deg) scale(1); opacity: .88; } }
 .court-app .btn {
-  display: block; width: min(88vw, 420px); margin-top: 18px; padding: 15px;
-  background: rgba(255,255,255,.6); border: 1px solid rgba(24,28,38,.4); border-radius: 10px;
-  color: var(--ink); font-size: 17px; letter-spacing: .4em; text-indent: .4em; cursor: pointer;
-  transition: transform .16s cubic-bezier(.34,1.56,.64,1), background .15s ease;
+  display: block; width: min(90vw, 440px); flex: 0 0 auto;
+  margin: 18px auto calc(10px + env(safe-area-inset-bottom));
+  padding: 15px; border-radius: 12px; color: var(--ink);
+  font-family: inherit; font-size: 17px; letter-spacing: .4em; text-indent: .4em;
+  cursor: pointer;
 }
 .court-app .btn:disabled { opacity: .45; cursor: not-allowed; }
-.court-app .btn:active:not(:disabled) { background: rgba(24,28,38,.07); transform: scale(.965); }
-.court-app .btn.enter { animation: bodyFadeUp .5s .52s cubic-bezier(.22,.61,.36,1) both; }
-.court-app .btn.secondary { background: transparent; color: var(--ink-dim); font-size: 13px; letter-spacing: .2em; }
+.court-app .btn.secondary {
+  background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none;
+  border: none; box-shadow: none; color: var(--ink-dim); font-size: 13px; letter-spacing: .2em;
+}
+.court-app .btn.secondary::after { content: none; } /* 次要按鈕不套玻璃砂紋理 */
+
+/* ── 粉彩流動底(問卷質感層):五顆 OCEAN 粉彩色斑緩慢漂移 ── */
+.court-app .bgWash { position: fixed; inset: 0; overflow: hidden; z-index: 0; pointer-events: none; }
+.court-app .bgWash i {
+  position: absolute; width: 78vw; aspect-ratio: 1; border-radius: 50%;
+  background: radial-gradient(circle, var(--wc) 0%, transparent 62%);
+  opacity: .5; will-change: transform; font-style: normal;
+}
+.court-app .bgWash i:nth-child(1) { --wc: hsl(200, 85%, 82%); top: -18%; left: -22%; animation: drift1 26s ease-in-out infinite alternate, washShimmer 6.5s ease-in-out infinite; }
+.court-app .bgWash i:nth-child(2) { --wc: hsl(255, 75%, 86%); top: 4%;  right: -26%; animation: drift2 31s ease-in-out infinite alternate, washShimmer 8.2s ease-in-out 1.1s infinite; }
+.court-app .bgWash i:nth-child(3) { --wc: hsl(95, 70%, 82%);  top: 34%; left: -18%; animation: drift3 23s ease-in-out infinite alternate, washShimmer 5.7s ease-in-out 2.3s infinite; }
+.court-app .bgWash i:nth-child(4) { --wc: hsl(34, 90%, 84%);  bottom: -14%; right: -16%; animation: drift4 29s ease-in-out infinite alternate, washShimmer 7.4s ease-in-out .6s infinite; }
+.court-app .bgWash i:nth-child(5) { --wc: hsl(350, 80%, 86%); bottom: -22%; left: 8%;  animation: drift5 35s ease-in-out infinite alternate, washShimmer 9.1s ease-in-out 1.8s infinite; }
+@keyframes drift1 { to { transform: translate(14vw, 10vh) scale(1.22); } }
+@keyframes drift2 { to { transform: translate(-12vw, 14vh) scale(1.15); } }
+@keyframes drift3 { to { transform: translate(16vw, -8vh) scale(1.28); } }
+@keyframes drift4 { to { transform: translate(-10vw, -12vh) scale(1.18); } }
+@keyframes drift5 { to { transform: translate(12vw, -10vh) scale(1.12); } }
+@keyframes washShimmer { 0%, 100% { opacity: .5; } 50% { opacity: .3; } } /* 微微閃爍 */
+@media (prefers-reduced-motion: reduce) { .court-app .bgWash i { animation: none; } }
+.court-app .trial > *:not(.bgWash), .court-app .summons > *:not(.bgWash) { position: relative; z-index: 1; }
 
 /* ── 2|審訊 ─────────────────────────────────────────────── */
 .court-app .trial { }
@@ -118,7 +195,8 @@
   display: flex; justify-content: space-between; align-items: baseline;
   padding: 8px 18px 0; font-size: 11px; color: var(--ink-dim);
 }
-.court-app .stage { display: flex; align-items: flex-end; gap: 10px; padding: 8px 16px 4px; flex: 1; min-height: 0; }
+/* margin: auto 0 讓題目區浮在剩餘空間正中——上下留白均分,不再出現中段空洞 */
+.court-app .stage { display: flex; align-items: flex-end; gap: 10px; padding: 6px 18px 4px; flex: 0 0 auto; margin: auto 0; }
 .court-app .lawyerWrap { flex: 0 0 92px; align-self: flex-end; cursor: pointer; }
 .court-app .lawyer { width: 92px; height: 130px; display: block; animation: bob 3.2s ease-in-out infinite; }
 .court-app .lawyer.nod { animation: nod .5s ease-out; }
@@ -135,16 +213,14 @@
 .court-app .docGroup.write { animation: write .5s ease-out; }
 @keyframes write { 0%,100% { transform: rotate(0); } 30% { transform: rotate(-6deg) translateY(-2px); } 60% { transform: rotate(4deg); } }
 
+/* 新版把逐元素的 reduced-motion 覆寫大幅精簡，只留律師呼吸動畫這一條。 */
 @media (prefers-reduced-motion: reduce) {
   .court-app .lawyer { animation: none; }
-  .court-app .courtHeader, .court-app .summonsCard, .court-app .seal, .court-app .summonsBody p,
-  .court-app .btn.enter, .court-app .bubble.switching,
-  .court-app .recBtn.rec, .court-app .dots i, .court-app .agentLabel { animation: none !important; }
-  .court-app .btn, .court-app .ans, .court-app .recBtn, .court-app .dots i, .court-app .tmDone { transition: none !important; }
 }
 
 .court-app .bubble {
   position: relative; flex: 1; background: rgba(255,255,255,.75);
+  box-shadow: 0 1px 10px rgba(24,28,38,.05);
   border: 1px solid var(--hair); border-radius: 14px; padding: 14px 16px;
   min-height: 96px; display: flex; flex-direction: column; justify-content: center;
 }
@@ -152,20 +228,22 @@
   content: ''; position: absolute; left: -8px; bottom: 26px;
   border: 8px solid transparent; border-right-color: rgba(24,28,38,.16); border-left: 0;
 }
-.court-app .bubble.switching { animation: qIn .4s cubic-bezier(.22,.61,.36,1); }
-@keyframes qIn { from { opacity: .35; transform: translateY(5px); } to { opacity: 1; transform: none; } }
 .court-app .evidenceTag { font-size: 10.5px; letter-spacing: .25em; color: var(--ink-dim); margin-bottom: 6px; }
 .court-app .qText { font-size: 16px; line-height: 1.65; }
-.court-app .answers { padding: 6px 16px calc(14px + env(safe-area-inset-bottom)); display: grid; gap: 8px; }
+.court-app .answers {
+  padding: 6px calc(18px + env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) calc(18px + env(safe-area-inset-left));
+  display: grid; gap: 8px;
+}
 .court-app .ans {
   position: relative; display: flex; align-items: center; gap: 13px; padding: 12px 16px 12px 14px;
   background: linear-gradient(180deg, rgba(255,255,255,.92), rgba(255,255,255,.7));
   border: 1px solid rgba(24,28,38,.16); border-radius: 12px;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.85);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.85), 0 1px 8px rgba(24,28,38,.08);
   color: var(--ink); font-size: 15px; letter-spacing: .04em;
   cursor: pointer; text-align: left; width: 100%; overflow: hidden;
-  transition: transform .18s cubic-bezier(.34,1.56,.64,1), border-color .15s ease, background .15s ease;
+  transition: transform .08s ease, border-color .15s ease, background .15s ease;
 }
+/* 左緣強度刻度:1(絕對不是我)最淡 → 5(這就是我)最亮 */
 .court-app .ans::before {
   content: ''; position: absolute; left: 0; top: 14%; bottom: 14%;
   width: 2.5px; border-radius: 2px;
@@ -182,10 +260,6 @@
   font-size: 11px; color: var(--ink-dim);
 }
 .court-app .ans.flash { animation: ansFlash .45s ease-out; }
-@keyframes ansFlash {
-  0% { border-color: rgba(179,53,42,.6); box-shadow: inset 0 0 18px rgba(179,53,42,.18); }
-  100% { border-color: rgba(24,28,38,.16); box-shadow: inset 0 1px 0 rgba(255,255,255,.85); }
-}
 @media (max-height: 720px) {
   .court-app .waves { height: 26vh; height: 25dvh; }
   .court-app .bubble { min-height: 76px; padding: 10px 13px; }
@@ -196,13 +270,26 @@
   .court-app .ans .no { width: 21px; height: 21px; flex-basis: 21px; font-size: 10px; }
   .court-app .answers { gap: 6px; }
 }
-.court-app .dots { display: flex; gap: 4px; justify-content: center; padding: 4px 0 2px; flex-wrap: wrap; }
-.court-app .dots i {
-  width: 4px; height: 4px; border-radius: 50%; background: rgba(24,28,38,.16);
-  transition: background-color .35s ease, transform .35s cubic-bezier(.34,1.56,.64,1);
-  font-style: normal;
+@media (max-height: 640px) {
+  .court-app .waves { height: 22vh; height: 21dvh; }
+  .court-app .bubble { min-height: 64px; padding: 8px 12px; }
+  .court-app .qText { font-size: 13.5px; line-height: 1.5; }
+  .court-app .lawyer { width: 64px; height: 92px; }
+  .court-app .lawyerWrap { flex-basis: 64px; }
+  .court-app .ans { padding: 7px 12px 7px 11px; font-size: 13px; }
+  .court-app .answers { gap: 5px; padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
+  .court-app .trialHead { padding-top: 4px; }
 }
-.court-app .dots i.done { background: rgba(24,28,38,.6); transform: scale(1.3); }
+/* 彩色光暈回饋:--fc / --fcSoft 由 JS(見 OnboardingFlow.jsx handleAnswer)
+   依「當前題目所屬向度」注入純色，不再是固定的暗紅色。 */
+@keyframes ansFlash {
+  0% { border-color: var(--fc, rgba(24,28,38,.8));
+       box-shadow: inset 0 0 26px var(--fcSoft, rgba(24,28,38,.14)), 0 0 20px var(--fcSoft, transparent); }
+  100% { border-color: rgba(255,255,255,.75); box-shadow: 0 2px 14px rgba(24,28,38,.09), inset 0 1px 0 rgba(255,255,255,.9); }
+}
+.court-app .dots { display: flex; gap: 4px; justify-content: center; padding: 4px 0 2px; flex-wrap: wrap; }
+.court-app .dots i { width: 4px; height: 4px; border-radius: 50%; background: rgba(24,28,38,.16); font-style: normal; }
+.court-app .dots i.done { background: rgba(24,28,38,.6); }
 
 /* ── 3|口述證詞 ─────────────────────────────────────────── */
 .court-app .testimony { padding: 26px 22px calc(22px + env(safe-area-inset-bottom)); }
@@ -217,39 +304,57 @@
 .court-app .recBtn {
   flex: 1; padding: 15px; border-radius: 10px; border: 1px solid rgba(24,28,38,.4);
   background: rgba(255,255,255,.6); color: var(--ink); font-size: 16px; letter-spacing: .2em; cursor: pointer;
-  transition: transform .16s cubic-bezier(.34,1.56,.64,1), border-color .2s ease, color .2s ease;
 }
-.court-app .recBtn:active { transform: scale(.98); }
-.court-app .recBtn.rec { border-color: var(--seal); color: var(--seal); animation: recPulse 1.7s ease-in-out infinite; }
-@keyframes recPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(179,53,42,.22); }
-  50% { box-shadow: 0 0 0 7px rgba(179,53,42,0); }
-}
+.court-app .recBtn.rec { border-color: var(--seal); color: var(--seal); }
 .court-app .recTime { font-size: 13px; color: var(--ink-dim); min-width: 52px; text-align: right; }
-.court-app .tmDone {
-  margin-top: 12px; opacity: 0; transform: translateY(8px); pointer-events: none;
-  transition: opacity .38s cubic-bezier(.22,.61,.36,1), transform .38s cubic-bezier(.22,.61,.36,1);
-}
-.court-app .tmDone.show { opacity: 1; transform: none; pointer-events: auto; }
+.court-app .tmDone { margin-top: 12px; }
 .court-app .spacer { flex: 1; }
 .court-app .errorNote { font-size: 12.5px; color: var(--seal); margin-top: 8px; }
 
 /* ── 4|移送／連結／完成／結果（設計稿沒有涵蓋的步驟，延用同一套視覺語彙）── */
-.court-app .transfer { align-items: center; justify-content: center; padding: 26px; text-align: center; }
+.court-app .transfer { align-items: center; justify-content: center; padding: 26px; text-align: center; font-family: var(--font-result); }
 .court-app .warn { font-size: 11px; letter-spacing: .4em; text-indent: .4em; color: var(--seal); margin-bottom: 10px; }
 .court-app .tfTitle { font-size: 25px; letter-spacing: .25em; margin-bottom: 14px; }
 .court-app .tfBody { max-width: 420px; font-size: 14px; color: rgba(24,28,38,.75); }
 .court-app .tfBody p + p { margin-top: 10px; }
-.court-app .agentLabel { font-size: 18px; margin: 18px 0 4px; opacity: 0; animation: bodyFadeUp .55s .18s cubic-bezier(.22,.61,.36,1) both; }
+.court-app .agentLabel { font-size: 18px; margin: 18px 0 4px; }
 .court-app .agentWave { width: min(80vw, 360px); height: 70px; display: block; margin: 0 auto 10px; }
 
-.court-app .fieldLabel { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--ink-dim); width: min(88vw, 420px); margin-top: 14px; }
+.court-app .fieldLabel { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--ink-dim); width: min(90vw, 440px); margin-top: 14px; }
 .court-app .fieldInput {
   padding: 12px 14px; border-radius: 10px; border: 1px solid rgba(24,28,38,.3);
-  background: rgba(255,255,255,.7); color: var(--ink); font-size: 15px;
+  background: rgba(255,255,255,.7); color: var(--ink); font-size: 15px; font-family: var(--font-ui);
 }
-.court-app .agentList { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; width: min(88vw, 420px); }
+.court-app .agentList { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; width: min(90vw, 440px); }
 .court-app .agentList li {
   text-align: left; padding: 10px 14px; border: 1px solid var(--hair); border-radius: 10px;
   background: rgba(255,255,255,.6); font-size: 13.5px;
+}
+
+/* ═══ 玻璃砂質感:所有按鈕統一(毛玻璃 + 細顆粒,粉彩從霧面透出) ═══ */
+.court-app .btn,
+.court-app .ans,
+.court-app .recBtn,
+.court-app .tmDone {
+  position: relative; overflow: hidden;
+  background: linear-gradient(180deg, rgba(255,255,255,.58), rgba(255,255,255,.34));
+  backdrop-filter: blur(16px) saturate(1.5);
+  -webkit-backdrop-filter: blur(16px) saturate(1.5);
+  border: 1px solid rgba(255,255,255,.75);
+  box-shadow: 0 2px 14px rgba(24,28,38,.09), inset 0 1px 0 rgba(255,255,255,.9);
+}
+.court-app .btn::after,
+.court-app .ans::after,
+.court-app .recBtn::after,
+.court-app .tmDone::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  opacity: .05; mix-blend-mode: multiply; /* 砂 */
+}
+.court-app .btn:active,
+.court-app .ans:active,
+.court-app .recBtn:active,
+.court-app .tmDone:active {
+  background: linear-gradient(180deg, rgba(255,255,255,.8), rgba(255,255,255,.55));
+  border-color: rgba(255,255,255,.95);
 }

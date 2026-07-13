@@ -42,8 +42,8 @@ export default function AgentWaveCanvas({ dim }) {
               if (x === 0) ctx.moveTo(x, y)
               else ctx.lineTo(x, y)
             }
-            const [hh, bb] = flowGrad(currentDim.hue, 0.5, t, 0)
-            ctx.strokeStyle = hsb(hh, 80, bb, pass === 0 ? 0.12 : 0.85)
+            const [hh, ss, bb] = flowGrad(currentDim.hue, 0.5, t, 0)
+            ctx.strokeStyle = hsb(hh, ss, bb, pass === 0 ? 0.12 : 0.85)
             ctx.stroke()
           }
         }

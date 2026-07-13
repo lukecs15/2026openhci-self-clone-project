@@ -80,16 +80,30 @@ export function waveAt(d, xn, ph, shapeMul = 1, freqMul = 1) {
 }
 
 /**
- * 沿波形橫向流動的漸層色相/亮度（白紙底版：g 高的地方飽和度更深，取代
- * 深底版的「亮帶」，亮度下限拉高避免高飽和+低亮度混出髒黑色）。
- * @returns {[hue:number, brightness:number, g:number]}
+ * 沿波形橫向流動的漸層色相/飽和度/明度（v2 設計稿改版：明度恆亮
+ * 87~93，零暗部，「流動」改由飽和度承擔——淡彩 ↔ 濃彩巡行，取代 v1
+ * 版「亮度流動」的做法，跟審訊五色波、代理人波共用同一顆函式）。
+ * @returns {[hue:number, saturation:number, brightness:number]}
  */
 export function flowGrad(hue, xn, t, seed, opts = {}) {
   const waves = opts.waves ?? 1.3
   const flowSpeed = opts.flowSpeed ?? 1.4
   const hueShift = opts.hueShift ?? 26
   const g = 0.5 + 0.5 * Math.sin(xn * TAU * waves - t * flowSpeed + seed * 2.1)
-  return [(hue + (g - 0.5) * hueShift + 360) % 360, lerp(78, 58, g), g]
+  return [(hue + (g - 0.5) * hueShift + 360) % 360, lerp(58, 96, g), lerp(93, 87, g)]
+}
+
+/**
+ * 開場專用的流動漸層（跟 flowGrad 同一套時間/相位公式，只是亮度區間不同，
+ * 逐式移植設計稿新增的 flowGradO，給 CourtOpening.jsx 的五波爆閃層用）。
+ * @returns {[hue:number, saturation:number, brightness:number]}
+ */
+export function flowGradO(hue, xn, t, seed, opts = {}) {
+  const waves = opts.waves ?? 1.3
+  const flowSpeed = opts.flowSpeed ?? 1.4
+  const hueShift = opts.hueShift ?? 26
+  const g = 0.5 + 0.5 * Math.sin(xn * TAU * waves - t * flowSpeed + seed * 2.1)
+  return [(hue + (g - 0.5) * hueShift + 360) % 360, lerp(55, 95, g), lerp(94, 88, g)]
 }
 
 /**

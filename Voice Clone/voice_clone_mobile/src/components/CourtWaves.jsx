@@ -24,6 +24,9 @@ import { BIG_FIVE_QUESTIONS } from '../data/bigFiveQuestions'
 import { DIMS, PER_DIM, findDimIndexByKey } from '../data/oceanDims'
 import { TAU, clamp, lerp, hsb, flowGrad, waveAt, vnoise, fitCanvas } from '../utils/courtVisuals'
 
+// 頂部安全邊距:第一條波的標籤不貼上緣（v2 設計稿新增）。
+const PAD_TOP = 14
+
 function buildInitialState() {
   return DIMS.map((d) => ({
     sum: 0,
@@ -91,14 +94,14 @@ const CourtWaves = forwardRef(function CourtWaves({ answers }, ref) {
         const W = cv.width
         const H = cv.height
         ctx.clearRect(0, 0, W, H)
-        const bandH = H / 5
+        const bandH = (H - PAD_TOP) / 5
 
         DIMS.forEach((dim, i) => {
           const s = stateRef.current[i]
           s.pulse *= 0.94
           s.current.waveHeight = lerp(s.current.waveHeight, s.target.waveHeight, 0.05)
           s.current.amplitude = lerp(s.current.amplitude, s.target.amplitude, 0.05)
-          const cy = bandH * (i + 0.5)
+          const cy = PAD_TOP + bandH * (i + 0.5)
           const certainty = clamp(s.count / PER_DIM, 0, 1)
           const mist = (1 - certainty) * 0.5
           const breathe = 0.85 + 0.15 * Math.sin((t / 2.6) * TAU)
@@ -112,8 +115,8 @@ const CourtWaves = forwardRef(function CourtWaves({ answers }, ref) {
             ctx.lineWidth = w
             for (let k = 0; k < pts.length - 1; k += 1) {
               const xn = k / (pts.length - 1)
-              const [hh, bb] = flowGrad(dim.hue, xn, t, i)
-              ctx.strokeStyle = hsb(hh, 90, Math.max(bb - 8 * glow, 46), aBase * alphaMul)
+              const [hh, ss, bb] = flowGrad(dim.hue, xn, t, i)
+              ctx.strokeStyle = hsb(hh, Math.min(100, ss + 10 * glow), bb, aBase * alphaMul)
               ctx.beginPath()
               ctx.moveTo(pts[k][0], pts[k][1])
               ctx.lineTo(pts[k + 1][0], pts[k + 1][1])
@@ -157,7 +160,7 @@ const CourtWaves = forwardRef(function CourtWaves({ answers }, ref) {
                 const idx = Math.floor(u * (main.length - 1))
                 const [px, py] = main[idx]
                 const ln = 3 + 6 * tw
-                ctx.strokeStyle = hsb(dim.hue, 78, 42, 0.85 * tw)
+                ctx.strokeStyle = hsb(dim.hue, 92, 92, 0.9 * tw)
                 ctx.lineWidth = 1.1
                 ctx.beginPath()
                 ctx.moveTo(px - ln, py)
@@ -169,12 +172,12 @@ const CourtWaves = forwardRef(function CourtWaves({ answers }, ref) {
             }
           }
 
-          ctx.fillStyle = hsb(dim.hue, 70, 40, 0.3 + 0.55 * certainty)
-          ctx.font = '11px "Noto Sans TC", sans-serif'
-          ctx.fillText(dim.label, 12, cy - bandH * 0.3)
-          ctx.fillStyle = hsb(dim.hue, 60, 42, 0.22 + 0.4 * certainty)
-          ctx.font = '8px ui-monospace, monospace'
-          ctx.fillText(dim.en.toUpperCase(), 12, cy - bandH * 0.3 + 11)
+          ctx.fillStyle = `rgba(24,28,38,${0.34 + 0.5 * certainty})`
+          ctx.font = '11px "GenJyuuGothic", "Noto Sans TC", sans-serif'
+          ctx.fillText(dim.label, 16, cy - bandH * 0.3)
+          ctx.fillStyle = `rgba(24,28,38,${0.24 + 0.38 * certainty})`
+          ctx.font = '8px "GenJyuuGothic", ui-monospace, monospace'
+          ctx.fillText(dim.en.toUpperCase(), 16, cy - bandH * 0.3 + 11)
         })
       }
       rafIdRef.current = requestAnimationFrame(draw)

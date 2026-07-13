@@ -68,7 +68,7 @@ export default function LawyerAvatar({ event, onTap }) {
             </g>
             <circle cx="27" cy="21" r="1.9" stroke="rgba(24,28,38,.85)" strokeWidth="1.7" />
             <circle cx="65" cy="21" r="1.9" stroke="rgba(24,28,38,.85)" strokeWidth="1.7" />
-            <g fill="none" strokeWidth="1.35" strokeLinecap="round">
+            <g fill="none" strokeWidth="1.1" strokeLinecap="round">
               <path d="M30,25 q4,-1.6 8,0 t8,0 t8,0 t8,0" stroke="var(--O)" />
               <path d="M30,29 q4,-0.9 8,0 t8,0 t8,0 t8,0" stroke="var(--C)" />
               <path d="M30,33 q4,-2.4 8,0 t8,0 t8,0 t8,0" stroke="var(--E)" />

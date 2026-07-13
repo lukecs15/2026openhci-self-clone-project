@@ -1,12 +1,13 @@
 /**
  * OnboardingFlow.jsx — 手機端主流程（「心智最高法院」法庭審訊主題）
  *
- * 這份檔案的視覺設計改成使用者提供的設計稿 inner-court-survey-fix8.html
- * （見 styles/court.css 開頭的移植說明），但整個功能流程/state machine跟
- * 改版之前完全一樣，只是重新蒙皮：
+ * 這份檔案的視覺設計對應使用者提供的設計稿（見 styles/court.css 開頭的
+ * 移植說明，目前是第二版設計稿「內在法庭_手機問卷 (4).html」），但整個
+ * 功能流程/state machine 跟改版之前完全一樣，只是重新蒙皮：
  *
- *   opening（新增，簡化版開場，見 components/CourtOpening.jsx）
- *     → welcome（電子傳票 / 出庭通知，對應設計稿「1|電子傳票」）
+ *   opening（開場，見 components/CourtOpening.jsx）
+ *     → welcome（電子傳票 / 刑事傳喚通知書，對應設計稿「1|電子傳票」，
+ *       v2 改成公文格式）
  *     → questionnaire（審訊，對應設計稿「2|審訊」，15 題 BFI-2-XS）
  *     → record（口述證詞，對應設計稿「3|口述證詞」）
  *     → connect（移送聯繫——設計稿沒有這一步，是這個 app 既有的功能：
@@ -16,6 +17,25 @@
  *     → result-scan（設計稿沒有，既有功能：體驗結束後掃第二個 QR 查看
  *       融合波形+總結）
  *                                                       └→ error（可重試）
+ *
+ * v2 改版重點（跟第一版 inner-court-survey-fix8.html 比對後的差異，逐一
+ * 核對過套用進來）：
+ *   - 電子傳票整個改成公文格式（docMeta/docCourt/docRule/docTitle/
+ *     docFields/docBody/docFoot），新增 docDate（發文日期，格式「心智紀元
+ *     YYYY 年 M 月 D 日」）；caseNo 沿用同一組「YYYY-XXXX」格式，只是顯示
+ *     位置換成「發文字號:心智法庭傳字第 XXXX 號」。
+ *   - 震動回饋（buzz）整個拿掉：v2 設計稿把 buzz() 函式定義跟所有呼叫點都
+ *     刪了，這裡跟著拿掉（utils/courtFeedback.js 也移除了這個函式）。
+ *   - 答對選項的 flash 光暈改成依「這一題屬於哪個 OCEAN 向度」動態上色
+ *     （lawyerEvent 多帶一個 dim 欄位，TrialStep 用它算出 --fc/--fcSoft
+ *     兩個 CSS 自訂屬性，注入到剛點擊的按鈕上），不再是固定的暗紅色。
+ *   - 審訊/傳票畫面新增 bgWash 背景層（五顆漂移的 OCEAN 粉彩色斑）。
+ *   - 審訊題目泡泡切換不再有進場動畫（拿掉 bubble.switching / qIn），
+ *     跟著拿掉這裡對應的 class。
+ *   - 口供錄音完成按鈕（tmDone）從「CSS class 控制 show/hide」改成單純
+ *     用 React 條件渲染（audioUrl && !isRecording 才掛載到 DOM），效果
+ *     跟設計稿新版「display:none ↔ block」的直接切換相同，只是用更符合
+ *     React 慣例的寫法達成。
  *
  * 沿用/保留的既有修過的 bug fix（改版時特別注意沒有回歸）：
  *   - Safari 錄音相容性：startRecording 的 try/catch、getUserMedia/
@@ -38,7 +58,7 @@ import { DIMS } from '../data/oceanDims'
 import { computeBigFiveScores } from '../store/questionnaireFlow'
 import { linkOnboardingSession } from '../api/onboardingClient'
 import { extractSessionIdFromScannedText } from '../utils/sessionLink'
-import { ping, buzz, getAudioContext } from '../utils/courtFeedback'
+import { ping, getAudioContext } from '../utils/courtFeedback'
 import { hsb } from '../utils/courtVisuals'
 import CourtOpening from '../components/CourtOpening'
 import CourtWaves from '../components/CourtWaves'
@@ -66,6 +86,18 @@ function formatElapsed(ms) {
   return `${m}:${s}`
 }
 
+function BgWash() {
+  return (
+    <div className="bgWash">
+      <i />
+      <i />
+      <i />
+      <i />
+      <i />
+    </div>
+  )
+}
+
 export default function OnboardingFlow() {
   const [step, setStep] = useState('opening')
   const [sessionId, setSessionId] = useState('')
@@ -81,11 +113,16 @@ export default function OnboardingFlow() {
   const [linkedAgents, setLinkedAgents] = useState([])
   const [resultConnectMode, setResultConnectMode] = useState('scan') // 'scan' | 'manual'
   const [resultSessionInput, setResultSessionInput] = useState('')
-  const [lawyerEvent, setLawyerEvent] = useState({ seq: 0, kind: null, value: null })
+  const [lawyerEvent, setLawyerEvent] = useState({ seq: 0, kind: null, value: null, dim: null })
   const [quip, setQuip] = useState(null)
 
-  // 案號只在掛載時產生一次（純裝飾用，呼應設計稿 caseNo 的呈現方式）。
+  // 案號/發文日期只在掛載時產生一次（純裝飾用，呼應設計稿 caseNo／docDate
+  // 的呈現方式）。
   const caseNo = useMemo(() => `${new Date().getFullYear()}-${String(Math.floor(Math.random() * 9000) + 1000)}`, [])
+  const docDate = useMemo(() => {
+    const d = new Date()
+    return `心智紀元 ${d.getFullYear()} 年 ${d.getMonth() + 1} 月 ${d.getDate()} 日`
+  }, [])
 
   const mediaRecorderRef = useRef(null)
   const chunksRef = useRef([])
@@ -126,10 +163,11 @@ export default function OnboardingFlow() {
     const q = currentQuestion
     const nextAnswers = { ...answers, [q.id]: value }
     setAnswers(nextAnswers)
-    buzz(10)
     ping(q.dim)
     courtWavesRef.current?.pulse(q.dim)
-    setLawyerEvent((prev) => ({ seq: prev.seq + 1, kind: 'answer', value }))
+    // dim 欄位給 TrialStep 算 flash 光暈顏色用（v2 設計稿依當前題目所屬
+    // 向度動態上色，不再是固定的暗紅色）。
+    setLawyerEvent((prev) => ({ seq: prev.seq + 1, kind: 'answer', value, dim: q.dim }))
 
     if (isLastQuestion) {
       // 最後一題留 700ms 讓律師反應動畫播完，再切到口述證詞畫面（逐邏輯
@@ -147,7 +185,7 @@ export default function OnboardingFlow() {
   const handleLawyerTap = () => {
     if (step !== 'questionnaire' || quipLockRef.current) return
     quipLockRef.current = true
-    setLawyerEvent((prev) => ({ seq: prev.seq + 1, kind: 'tap', value: null }))
+    setLawyerEvent((prev) => ({ seq: prev.seq + 1, kind: 'tap', value: null, dim: null }))
     setQuip(QUIPS[Math.floor(Math.random() * QUIPS.length)])
     setTimeout(() => {
       setQuip(null)
@@ -226,7 +264,6 @@ export default function OnboardingFlow() {
       mediaRecorderRef.current = recorder
       recStartRef.current = Date.now()
       setIsRecording(true)
-      buzz(14)
     } catch (err) {
       setIsRecording(false)
       if (err && err.name === 'NotAllowedError') {
@@ -243,7 +280,6 @@ export default function OnboardingFlow() {
     mediaRecorderRef.current?.stop()
     setIsRecording(false)
     setAnalyserNode(null)
-    buzz(10)
   }
 
   // 錄音計時器：跟 CourtMicVisualizer 的 canvas rAF 迴圈分開管理，各自獨立
@@ -327,8 +363,8 @@ export default function OnboardingFlow() {
       {step === 'welcome' && (
         <SummonsStep
           caseNo={caseNo}
+          docDate={docDate}
           onEnter={() => {
-            buzz(10)
             ping('C')
             setStep('questionnaire')
           }}
@@ -416,27 +452,48 @@ export default function OnboardingFlow() {
   )
 }
 
-/** 1|電子傳票 — 出庭通知（對應設計稿「summons」畫面）。 */
-function SummonsStep({ caseNo, onEnter }) {
+/** 1|電子傳票 — 刑事傳喚通知書（v2 設計稿改成公文格式，對應「summons」畫面）。 */
+function SummonsStep({ caseNo, docDate, onEnter }) {
   return (
     <div className="court-step summons scroll">
-      <div className="courtHeader">
-        <div className="rule" />
-        <div className="courtName serif">心智最高法院</div>
-      </div>
-      <div className="summonsCard">
-        <div className="seal serif">傳喚</div>
-        <div className="summonsTitle serif">出庭通知</div>
-        <div className="caseNo mono">CASE NO. {caseNo}・被傳喚人:本人</div>
-        <div className="summonsBody">
-          {/* 逐字移植設計稿 summonsBody 的兩段文字，含標點風格（半形逗號/
-              分號，頓號句號維持全形）。 */}
-          <p>你因一起尚未言明的內在案件,被本院傳喚到庭。</p>
-          <p>開庭前,偵查官將對你進行「心智基因定序」,逐題出示指控證據;請依實答辯。你的每一次回答,都會讓庭上那五個聲音更接近成形。</p>
+      <BgWash />
+      <div className="doc">
+        <div className="docMeta mono">
+          檔　　號:PSY-INT
+          <br />
+          保存年限:永久
+        </div>
+        <div className="docCourt serif">心智最高法院</div>
+        <div className="docRule" />
+        <div className="docTitle serif">刑事傳喚通知書</div>
+        <div className="docFields">
+          <div>
+            受文者:<b>本人</b>
+          </div>
+          <div>發文日期:{docDate}</div>
+          <div>
+            發文字號:心智法庭傳字第 <span className="mono">{caseNo}</span> 號
+          </div>
+          <div>速　　別:最速件</div>
+          <span className="seal serif">傳喚</span>
+        </div>
+        <div className="docBody serif">
+          <p>
+            <b>主旨:</b>涉案人因近期陷入嚴重內耗與思考反芻,涉嫌違反《心智健康保護法》之「過度自我摧殘罪」,依法傳喚到庭應訊,請查照。
+          </p>
+          <p>
+            <b>說明:</b>
+          </p>
+          <p className="li">一、正式開庭審理前,本庭偵查官將對涉案人執行「心智基因定序」,以釐清體內失控之思緒特質。</p>
+          <p className="li">二、涉案人應就以下十五項行為指控如實招供,所述內容均將成為呈堂證供。</p>
+        </div>
+        <div className="docFoot">
+          <div className="mono docCopy">正本:涉案人本人　副本:內在法庭合議庭</div>
+          <div className="docOrg serif">心智最高法院　內在法庭</div>
         </div>
       </div>
       <button type="button" className="btn enter" onClick={onEnter}>
-        應 訊
+        簽 收 應 訊
       </button>
     </div>
   )
@@ -445,7 +502,8 @@ function SummonsStep({ caseNo, onEnter }) {
 /** 2|審訊 — Big Five 問卷（對應設計稿「trial」畫面）。 */
 function TrialStep({ courtWavesRef, answers, questionIndex, currentQuestion, lawyerEvent, quip, onAnswer, onPrev, onLawyerTap }) {
   return (
-    <div className="court-step trial">
+    <div className="court-step trial scroll">
+      <BgWash />
       <CourtWaves ref={courtWavesRef} answers={answers} />
       <div className="dots">
         {BIG_FIVE_QUESTIONS.map((q, i) => (
@@ -478,7 +536,7 @@ function TrialStep({ courtWavesRef, answers, questionIndex, currentQuestion, law
       </div>
       <div className="stage">
         <LawyerAvatar key={lawyerEvent.seq} event={lawyerEvent} onTap={onLawyerTap} />
-        <div className="bubble switching" key={quip ? `quip-${lawyerEvent.seq}` : currentQuestion.id}>
+        <div className="bubble" key={quip ? `quip-${lawyerEvent.seq}` : currentQuestion.id}>
           <div className="evidenceTag mono">
             {quip ? '偵查官' : `指控證據 ${String(questionIndex + 1).padStart(2, '0')}`}
           </div>
@@ -492,12 +550,18 @@ function TrialStep({ courtWavesRef, answers, questionIndex, currentQuestion, law
           // （不同題但同一個 value），key 還是會變，animation 才會重新播放
           // 一次，而不是只在第一次點擊時生效。
           const isFlashing = lawyerEvent.kind === 'answer' && lawyerEvent.value === opt.value
+          // v2 設計稿:flash 光暈依「這一題屬於哪個 OCEAN 向度」動態上色
+          // （--fc/--fcSoft 自訂屬性），不再是固定的暗紅色。
+          const flashDim = isFlashing ? DIMS.find((d) => d.key === lawyerEvent.dim) : null
+          const style = flashDim
+            ? { '--lv': opt.value, '--fc': `hsla(${flashDim.hue}, 92%, 58%, .9)`, '--fcSoft': `hsla(${flashDim.hue}, 92%, 62%, .35)` }
+            : { '--lv': opt.value }
           return (
             <button
               key={isFlashing ? `ans-${opt.value}-${lawyerEvent.seq}` : `ans-${opt.value}`}
               type="button"
               className={`ans${isFlashing ? ' flash' : ''}`}
-              style={{ '--lv': opt.value }}
+              style={style}
               onClick={() => onAnswer(opt.value)}
             >
               <span className="no mono">{opt.value}</span>
@@ -512,6 +576,7 @@ function TrialStep({ courtWavesRef, answers, questionIndex, currentQuestion, law
 
 /** 3|口述證詞 — 錄音（對應設計稿「testimony」畫面）。 */
 function TestimonyStep({ isRecording, audioUrl, recTimeLabel, analyserNode, errorMessage, onStart, onStop, onReRecord, onDone }) {
+  const isDone = Boolean(audioUrl) && !isRecording
   return (
     <div className="court-step testimony scroll">
       <div className="tmHead serif">錄口供</div>
@@ -528,7 +593,7 @@ function TestimonyStep({ isRecording, audioUrl, recTimeLabel, analyserNode, erro
         <span className="recTime mono">{recTimeLabel}</span>
       </div>
 
-      {audioUrl && !isRecording && (
+      {isDone && (
         <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
           {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
           <audio src={audioUrl} controls style={{ width: '100%' }} />
@@ -538,9 +603,14 @@ function TestimonyStep({ isRecording, audioUrl, recTimeLabel, analyserNode, erro
         </div>
       )}
 
-      <button type="button" className={`btn tmDone${audioUrl && !isRecording ? ' show' : ''}`} onClick={onDone}>
-        具結,呈交證詞
-      </button>
+      {/* v2 設計稿把 tmDone 的顯示邏輯從「CSS class 控制 opacity/transform」
+          改成單純的 display:none ↔ block；React 版用條件渲染達成一樣的
+          效果（沒作好之前根本不掛載到 DOM，比切 CSS class 更直接）。 */}
+      {isDone && (
+        <button type="button" className="btn tmDone" onClick={onDone}>
+          具結,呈交證詞
+        </button>
+      )}
       <div className="spacer" />
     </div>
   )

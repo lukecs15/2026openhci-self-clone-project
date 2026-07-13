@@ -1,10 +1,15 @@
 /**
- * courtFeedback.js — 法庭主題的感官回饋：震動（buzz）+ 五聲音階提示音（ping）
+ * courtFeedback.js — 法庭主題的感官回饋：五聲音階提示音（ping）+ 低頻撞擊音（boom）
  *
- * 逐字從設計稿 inner-court-survey-fix8.html 搬過來。ping() 用 Web Audio
- * 振盪器即時合成音效（不需要載入任何音檔），每個 OCEAN 向度對應一個音高，
- * 答題/開庭時彈一聲，是設計稿刻意設計的「五聲音階」聽覺語言，跟畫面上的
- * 五色語言互相呼應。
+ * 逐字從設計稿搬過來。ping() 用 Web Audio 振盪器即時合成音效（不需要載入
+ * 任何音檔），每個 OCEAN 向度對應一個音高，答題/開庭時彈一聲，是設計稿刻意
+ * 設計的「五聲音階」聽覺語言，跟畫面上的五色語言互相呼應。
+ *
+ * v2 改版（對照最新設計稿「內在法庭_手機問卷 (4).html」）：原本的震動回饋
+ * buzz() 整個拿掉了——設計稿把函式定義跟所有呼叫點都刪了，這裡跟著移除。
+ * 開場畫面新增的低頻撞擊音 boom()（開場「離場」轉場時的音效）留在
+ * components/CourtOpening.jsx 裡自己定義，因為它只有那裡用得到，不需要
+ * 提升到這個共用模組。
  *
  * AudioContext 是全域單例（瀏覽器對 AudioContext 數量有限制，而且需要使用者
  * 手勢後才能真正發聲，第一次呼叫 ping() 時建立即可，不需要等某個「初始化」
@@ -22,18 +27,6 @@ function getAudioContext() {
     audioContext = new AudioContextCtor()
   }
   return audioContext
-}
-
-/** 震動回饋，裝置/瀏覽器不支援 navigator.vibrate 時安靜地什麼都不做。 */
-export function buzz(ms = 8) {
-  if (navigator.vibrate) {
-    try {
-      navigator.vibrate(ms)
-    } catch {
-      // 部分瀏覽器在非使用者手勢情境下呼叫 vibrate 會拋例外，忽略即可，
-      // 震動只是錦上添花，不影響任何功能正確性。
-    }
-  }
 }
 
 /**
