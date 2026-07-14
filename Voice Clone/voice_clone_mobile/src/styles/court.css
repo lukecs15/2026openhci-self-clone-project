@@ -291,23 +291,54 @@
 .court-app .dots i { width: 4px; height: 4px; border-radius: 50%; background: rgba(24,28,38,.16); font-style: normal; }
 .court-app .dots i.done { background: rgba(24,28,38,.6); }
 
-/* ── 3|口述證詞 ─────────────────────────────────────────── */
+/* ── 3|口述證詞（v17 設計稿改版：角色臉孔視覺 + 口供回放列）───────── */
 .court-app .testimony { padding: 26px 22px calc(22px + env(safe-area-inset-bottom)); }
+.court-app .testimony .recRow,
+.court-app .testimony .tmDone,
+.court-app .testimony .micCanvas {
+  width: min(92vw, 460px);
+  margin-left: auto; margin-right: auto;
+}
 .court-app .tmHead { font-size: 22px; letter-spacing: .2em; margin-bottom: 8px; }
 .court-app .tmSub { font-size: 13px; color: var(--ink-dim); margin-bottom: 18px; }
 .court-app .prompt {
   border-left: 2px solid rgba(24,28,38,.35); padding: 4px 0 4px 14px;
   font-size: 16.5px; line-height: 1.8; margin-bottom: 20px;
 }
-.court-app .micCanvas { width: 100%; height: 120px; display: block; margin-bottom: 14px; }
-.court-app .recRow { display: flex; gap: 10px; align-items: center; }
+/* v17：口供頁的提示改置中、拿掉左邊框（設計稿 #testimony .prompt） */
+.court-app .testimony .prompt {
+  border-left: none; padding-left: 0; text-align: center;
+  max-width: 30em; margin-left: auto; margin-right: auto;
+}
+/* v17：畫布改為撐滿剩餘高度的角色主視覺（原本是固定 120px 的波形帶） */
+.court-app .micCanvas { width: 100%; flex: 1 1 auto; min-height: 200px; display: block; margin-bottom: 10px; }
+.court-app .recRow { display: flex; gap: 10px; align-items: center; padding-left: 4px; padding-right: 4px;}
 .court-app .recBtn {
   flex: 1; padding: 15px; border-radius: 10px; border: 1px solid rgba(24,28,38,.4);
   background: rgba(255,255,255,.6); color: var(--ink); font-size: 16px; letter-spacing: .2em; cursor: pointer;
 }
 .court-app .recBtn.rec { border-color: var(--seal); color: var(--seal); }
-.court-app .recTime { font-size: 13px; color: var(--ink-dim); min-width: 52px; text-align: right; }
+/* v17：計時改成畫布下方置中一行（原本是 recRow 右側小字） */
+.court-app .recTime { font-size: 14px; text-align: center; letter-spacing: .12em; margin-bottom: 8px; }
 .court-app .tmDone { margin-top: 12px; }
+/* v17：口供回放列（聽過才具結）——播放/暫停圓鈕 + 可點擊進度條 + 時間 */
+.court-app .playRow {
+  display: flex; align-items: center; gap: 12px;
+  width: min(92vw, 460px); margin: 0 auto 12px;
+}
+.court-app .playBtn {
+  width: 46px; height: 46px; flex: 0 0 46px; border-radius: 50%;
+  background: linear-gradient(180deg, rgba(255,255,255,.9), rgba(255,255,255,.6));
+  border: 1px solid rgba(24,28,38,.3); color: var(--ink);
+  font-size: 15px; cursor: pointer; display: grid; place-items: center;
+}
+.court-app .playBtn:active { transform: scale(.94); }
+.court-app .playTrack {
+  flex: 1; height: 5px; border-radius: 3px; background: rgba(24,28,38,.14);
+  overflow: hidden; cursor: pointer;
+}
+.court-app .playFill { width: 0%; height: 100%; background: rgba(24,28,38,.75); border-radius: 3px; }
+.court-app .playTime { font-size: 12px; color: var(--ink-dim); min-width: 44px; text-align: right; }
 .court-app .spacer { flex: 1; }
 .court-app .errorNote { font-size: 12.5px; color: var(--seal); margin-top: 8px; }
 

@@ -116,6 +116,10 @@ function formatElapsed(ms) {
   return `${m}:${s}`
 }
 
+// v17 設計稿：口供最短 5 秒（太短駁回、錄音繼續）、最長 60 秒（自動停止）。
+const REC_MIN_MS = 5000
+const REC_MAX_MS = 60000
+
 function BgWash() {
   return (
     <div className="bgWash">
@@ -165,6 +169,10 @@ export default function OnboardingFlow() {
   const quipLockRef = useRef(false)
   const recStartRef = useRef(0)
   const recTimerIdRef = useRef(null)
+  // v17 設計稿：口供長度限制（REC_MIN_MS / REC_MAX_MS）
+  const autoStopTORef = useRef(null)
+  const tooShortTORef = useRef(null)
+  const [tooShortNotice, setTooShortNotice] = useState(false)
 
   const scores = useMemo(() => computeBigFiveScores(BIG_FIVE_QUESTIONS, answers), [answers])
   const currentQuestion = BIG_FIVE_QUESTIONS[questionIndex]
@@ -228,6 +236,14 @@ export default function OnboardingFlow() {
 
   const startRecording = async () => {
     setErrorMessage('')
+    // v17：重新錄口供時，上一段口供的回放列先收起來（對照設計稿 recBtn
+    // 點擊處理裡的 playRow.classList.remove('on')），錄完新的才重新出現。
+    setAudioBlob(null)
+    setAudioUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return ''
+    })
+    setTooShortNotice(false)
     try {
       // Safari（尤其是 iOS）對 getUserMedia／MediaRecorder 的支援跟 Chrome
       // 不太一樣：非安全情境（不是 https 或 localhost）會直接拒絕權限要求、
@@ -297,6 +313,10 @@ export default function OnboardingFlow() {
       mediaRecorderRef.current = recorder
       recStartRef.current = Date.now()
       setIsRecording(true)
+      // v17：60 秒上限，自動停止（避免無限長的口供）。直接呼叫底層的
+      // doStopRecording()，不走「太短駁回」檢查（60 秒必然超過 5 秒）。
+      if (autoStopTORef.current) clearTimeout(autoStopTORef.current)
+      autoStopTORef.current = setTimeout(() => doStopRecording(), REC_MAX_MS)
     } catch (err) {
       setIsRecording(false)
       if (err && err.name === 'NotAllowedError') {
@@ -309,10 +329,29 @@ export default function OnboardingFlow() {
     }
   }
 
-  const stopRecording = () => {
+  // 真正停止錄音（60 秒自動停止與通過長度檢查的手動停止共用）。
+  const doStopRecording = () => {
+    if (autoStopTORef.current) {
+      clearTimeout(autoStopTORef.current)
+      autoStopTORef.current = null
+    }
     mediaRecorderRef.current?.stop()
     setIsRecording(false)
     setAnalyserNode(null)
+    setTooShortNotice(false)
+  }
+
+  // v17：手動按「停止」——不足 5 秒駁回（recBtn 短暫顯示「口供過短」，
+  // 錄音繼續），對照設計稿 REC_MIN_MS 的處理。
+  const stopRecording = () => {
+    const elapsed = Date.now() - recStartRef.current
+    if (elapsed < REC_MIN_MS) {
+      setTooShortNotice(true)
+      if (tooShortTORef.current) clearTimeout(tooShortTORef.current)
+      tooShortTORef.current = setTimeout(() => setTooShortNotice(false), 1500)
+      return
+    }
+    doStopRecording()
   }
 
   // 錄音計時器：跟 CourtMicVisualizer 的 canvas rAF 迴圈分開管理，各自獨立
@@ -336,14 +375,6 @@ export default function OnboardingFlow() {
     }
   }, [isRecording])
 
-  const handleReRecord = () => {
-    setAudioBlob(null)
-    setAudioUrl((prev) => {
-      if (prev) URL.revokeObjectURL(prev)
-      return ''
-    })
-    setRecTimeLabel('00:00')
-  }
 
   const handleQrDecoded = (scannedText) => {
     const parsed = extractSessionIdFromScannedText(scannedText)
@@ -445,37 +476,26 @@ export default function OnboardingFlow() {
           recTimeLabel={recTimeLabel}
           analyserNode={analyserNode}
           errorMessage={errorMessage}
+          tooShortNotice={tooShortNotice}
           onStart={startRecording}
           onStop={stopRecording}
-          onReRecord={handleReRecord}
-          onDone={() => setStep('connect')}
+          onDone={() => setStep('topic')}
         />
       )}
-        {step === 'record' && (
-          <RecordStep
-            isRecording={isRecording}
-            audioUrl={audioUrl}
-            errorMessage={errorMessage}
-            onStart={startRecording}
-            onStop={stopRecording}
-            onReRecord={handleReRecord}
-            onNext={() => setStep('topic')}
-          />
-        )}
 
-        {step === 'topic' && (
-          <TopicStep
-            choice={topicChoice}
-            onChoiceChange={(c) => { setErrorMessage(''); setTopicChoice(c) }}
-            preset={topicPreset}
-            onPresetChange={setTopicPreset}
-            custom={topicCustom}
-            onCustomChange={setTopicCustom}
-            errorMessage={errorMessage}
-            onBack={() => setStep('record')}
-            onNext={handleFinishTopic}
-          />
-        )}
+      {step === 'topic' && (
+        <TopicStep
+          choice={topicChoice}
+          onChoiceChange={(c) => { setErrorMessage(''); setTopicChoice(c) }}
+          preset={topicPreset}
+          onPresetChange={setTopicPreset}
+          custom={topicCustom}
+          onCustomChange={setTopicCustom}
+          errorMessage={errorMessage}
+          onBack={() => setStep('record')}
+          onNext={handleFinishTopic}
+        />
+      )}
 
       {step === 'connect' && (
         <ConnectStep
@@ -587,14 +607,6 @@ function TrialStep({ courtWavesRef, answers, questionIndex, currentQuestion, law
         {BIG_FIVE_QUESTIONS.map((q, i) => (
           <i key={q.id} className={i < questionIndex ? 'done' : ''} />
         ))}
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-      <div style={cardStyle}>
-        <p style={{ margin: 0, lineHeight: 1.7, color: colors.textMuted }}>
-          請在安靜的環境，用 5~15 秒自然地「說說你最近的煩惱或內耗」。
-          這段錄音會同時用來克隆你的音色（5 位自我 agent 都會用這個聲音
-          回覆），系統也可以直接從這段話判斷你想在內在法庭討論的議題
-          ——如果暫時沒有想法，隨意念一段話也可以，下一步能改選預設議題。
-        </p>
       </div>
       <div className="trialHead">
         <span className="serif">審訊・心智基因定序</span>
@@ -661,46 +673,138 @@ function TrialStep({ courtWavesRef, answers, questionIndex, currentQuestion, law
 }
 
 /** 3|口述證詞 — 錄音（對應設計稿「testimony」畫面）。 */
-function TestimonyStep({ isRecording, audioUrl, recTimeLabel, analyserNode, errorMessage, onStart, onStop, onReRecord, onDone }) {
+function TestimonyStep({ isRecording, audioUrl, recTimeLabel, analyserNode, errorMessage, tooShortNotice, onStart, onStop, onDone }) {
   const isDone = Boolean(audioUrl) && !isRecording
+
+  // recBtn 文案狀態機（逐邏輯對照 v17 設計稿）：錄音中顯示「停止」，太短
+  // 駁回時短暫換成提示文字；錄完變「重新錄口供」（直接重錄，不需要另一顆
+  // 按鈕，開始重錄的同時回放列會收起）。
+  let recLabel = '開始錄口供'
+  if (isRecording) recLabel = tooShortNotice ? '口供過短:請至少陳述 5 秒' : '停止'
+  else if (audioUrl) recLabel = '重新錄口供'
+
   return (
     <div className="court-step testimony scroll">
+      <BgWash />
       <div className="tmHead serif">錄口供</div>
       <div className="tmSub">案發事件口述・你的聲音將提供後續庭審使用</div>
       <div className="prompt">{TESTIMONY_PROMPT}</div>
       <CourtMicVisualizer analyserNode={analyserNode} recording={isRecording} />
+      {/* v17：計時移到畫布下方置中（原本藏在 recRow 右側） */}
+      <div className="recTime mono">{recTimeLabel}</div>
+
+      {/* v17：口供回放列——聽過才具結（取代原本的原生 <audio controls>） */}
+      {isDone && <PlaybackRow audioUrl={audioUrl} />}
 
       {errorMessage && !audioUrl && <p className="errorNote">{errorMessage}</p>}
 
       <div className="recRow">
         <button type="button" className={`recBtn${isRecording ? ' rec' : ''}`} onClick={isRecording ? onStop : onStart}>
-          {isRecording ? '停止' : audioUrl ? '重新錄口供' : '開始錄口供'}
+          {recLabel}
         </button>
-        <span className="recTime mono">{recTimeLabel}</span>
       </div>
 
+      {/* tmDone 只在錄完（且沒有在重錄）時掛載，對照設計稿 display:none ↔ block。 */}
       {isDone && (
-        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-          <audio src={audioUrl} controls style={{ width: '100%' }} />
-          <button type="button" className="btn secondary" onClick={onReRecord}>
-            重新錄音
-          </button>
-          <button onClick={onNext} style={primaryButtonStyle(true)}>
-            下一步：選擇討論議題
-          </button>
-        </div>
-      )}
-
-      {/* v2 設計稿把 tmDone 的顯示邏輯從「CSS class 控制 opacity/transform」
-          改成單純的 display:none ↔ block；React 版用條件渲染達成一樣的
-          效果（沒作好之前根本不掛載到 DOM，比切 CSS class 更直接）。 */}
-      {isDone && (
-        <button type="button" className="btn tmDone" onClick={onDone}>
+        <button type="button" className="btn tmDone" style={{ width: '100%' }} onClick={onDone}>
           具結,呈交證詞
         </button>
       )}
       <div className="spacer" />
+    </div>
+  )
+}
+
+/**
+ * PlaybackRow — 口供回放列（v17 設計稿新增：聽過才具結）。
+ * 播放/暫停圓鈕（▶/❚❚）+ 可點擊跳轉的進度條 + 目前時間。逐邏輯移植設計稿
+ * setupPlayback()／playBtn／playTrack 的處理，含「Chrome 錄音 blob 常回報
+ * Infinity 時長：先跳到極大值再跳回，逼它算出真值」的 workaround。
+ */
+function PlaybackRow({ audioUrl }) {
+  const audioRef = useRef(null)
+  const durRef = useRef(0)
+  const trackRef = useRef(null)
+  const [playing, setPlaying] = useState(false)
+  const [fillPct, setFillPct] = useState(0)
+  const [timeLabel, setTimeLabel] = useState('00:00')
+
+  useEffect(() => {
+    if (!audioUrl) return undefined
+    const audio = new Audio(audioUrl)
+    audioRef.current = audio
+    durRef.current = 0
+    setPlaying(false)
+    setFillPct(0)
+    setTimeLabel('00:00')
+
+    const onLoaded = () => {
+      // Chrome 錄音 blob 常回報 Infinity 時長：先跳到極大值再跳回，逼它算出真值。
+      if (audio.duration === Infinity) {
+        audio.currentTime = 1e7
+        const once = () => {
+          audio.removeEventListener('seeked', once)
+          durRef.current = audio.duration
+          audio.currentTime = 0
+        }
+        audio.addEventListener('seeked', once)
+      } else {
+        durRef.current = audio.duration
+      }
+    }
+    const onTime = () => {
+      const d = durRef.current || audio.duration
+      if (Number.isFinite(d) && d > 0) setFillPct((audio.currentTime / d) * 100)
+      setTimeLabel(formatElapsed(audio.currentTime * 1000))
+    }
+    const onEnded = () => {
+      setPlaying(false)
+      setFillPct(100)
+    }
+    audio.addEventListener('loadedmetadata', onLoaded)
+    audio.addEventListener('timeupdate', onTime)
+    audio.addEventListener('ended', onEnded)
+    return () => {
+      audio.pause()
+      audio.removeEventListener('loadedmetadata', onLoaded)
+      audio.removeEventListener('timeupdate', onTime)
+      audio.removeEventListener('ended', onEnded)
+      audioRef.current = null
+    }
+  }, [audioUrl])
+
+  const togglePlay = () => {
+    const audio = audioRef.current
+    if (!audio) return
+    if (audio.paused) {
+      audio.play()
+      setPlaying(true)
+    } else {
+      audio.pause()
+      setPlaying(false)
+    }
+  }
+
+  const seek = (e) => {
+    const audio = audioRef.current
+    const track = trackRef.current
+    if (!audio || !track) return
+    const r = track.getBoundingClientRect()
+    const d = durRef.current || audio.duration
+    if (Number.isFinite(d) && d > 0) {
+      audio.currentTime = ((e.clientX - r.left) / r.width) * d
+    }
+  }
+
+  return (
+    <div className="playRow">
+      <button type="button" className="playBtn" aria-label="播放口供" onClick={togglePlay}>
+        <span>{playing ? '❚❚' : '▶'}</span>
+      </button>
+      <div className="playTrack" ref={trackRef} onClick={seek}>
+        <div className="playFill" style={{ width: `${fillPct}%` }} />
+      </div>
+      <span className="playTime mono">{timeLabel}</span>
     </div>
   )
 }
@@ -715,126 +819,60 @@ const PRESET_TOPICS = [
 ]
 
 /**
- * TopicStep — 選擇要在「內在法庭」審理的議題（見檔案開頭 topic 步驟說明）。
+ * 立案 — 選擇要在「內在法庭」審理的議題（見檔案開頭 topic 步驟說明）。
+ * 設計稿沒有這一步（是後續加入的功能需求），視覺沿用同一套法庭公文語彙
+ * （court-step transfer 版型 + fieldInput/btn 元件樣式 + --seal/--ink 色票）。
  */
 function TopicStep({ choice, onChoiceChange, preset, onPresetChange, custom, onCustomChange, errorMessage, onBack, onNext }) {
   const optionStyle = (active) => ({
-    ...cardStyle,
-    padding: '0.85rem 1rem',
+    width: 'min(90vw, 440px)',
     textAlign: 'left',
+    padding: '14px 16px',
+    borderRadius: 12,
+    marginTop: 10,
+    border: active ? '1.5px solid var(--seal)' : '1px solid rgba(24,28,38,.18)',
+    background: active ? 'rgba(179,53,42,.07)' : 'rgba(255,255,255,.6)',
+    color: 'var(--ink)',
     cursor: 'pointer',
-    border: `1px solid ${active ? colors.accent : colors.border}`,
-    background: active ? 'rgba(99,102,241,0.12)' : colors.card,
+    boxSizing: 'border-box',
   })
 
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-      <div style={cardStyle}>
-        <p style={{ margin: 0, lineHeight: 1.7, color: colors.textMuted }}>
-          你想在「內在法庭」審理什麼樣的個案？兩位克隆自我會圍繞這個議題
-          激辯，你將以法官的身分聽審並介入。
-        </p>
-      </div>
-
-      <div style={optionStyle(choice === 'auto')} onClick={() => onChoiceChange('auto')}>
-        <strong>讓系統從我的錄音判斷</strong>
-        <p style={{ margin: '0.35rem 0 0', fontSize: '0.8rem', color: colors.textMuted }}>
-          用剛剛那段「說說最近的煩惱」的錄音內容，自動整理出議題。
-        </p>
-      </div>
-
-      <div style={optionStyle(choice === 'preset')} onClick={() => onChoiceChange('preset')}>
-        <strong>從預設議題中選一個</strong>
-        {choice === 'preset' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.6rem' }}>
-            {PRESET_TOPICS.map((t) => (
-              <button
-                key={t}
-                onClick={(e) => { e.stopPropagation(); onPresetChange(t) }}
-                style={{
-                  ...secondaryButtonStyle,
-                  textAlign: 'left',
-                  border: `1px solid ${preset === t ? colors.accent : colors.border}`,
-                  color: preset === t ? colors.text : colors.textMuted,
-                }}
-              >
-                {t}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div style={optionStyle(choice === 'custom')} onClick={() => onChoiceChange('custom')}>
-        <strong>自己輸入</strong>
-        {choice === 'custom' && (
-          <input
-            value={custom}
-            onChange={(e) => onCustomChange(e.target.value)}
-            onClick={(e) => e.stopPropagation()}
-            placeholder="用一句話描述你的煩惱，例如「該不該離職去進修」"
-            style={{
-              marginTop: '0.6rem',
-              width: '100%',
-              boxSizing: 'border-box',
-              padding: '0.6rem 0.75rem',
-              borderRadius: '0.5rem',
-              border: `1px solid ${colors.border}`,
-              background: colors.bg,
-              color: colors.text,
-            }}
-          />
-        )}
-      </div>
-
-      {errorMessage && <p style={{ margin: 0, fontSize: '0.8rem', color: colors.danger }}>{errorMessage}</p>}
-
-      <button onClick={onNext} style={primaryButtonStyle(true)}>
-        下一步：連結上傳
-      </button>
-      <button onClick={onBack} style={secondaryButtonStyle}>
-        返回錄音
-      </button>
-    </div>
-  )
-}
-
-/**
- * 移送聯繫 — 掃 QR / 手動輸入 session id 並上傳連結（設計稿沒有這一步，
- * 是這個 app 既有的功能，沿用同一套法庭視覺語彙）。
- */
-function TopicStep({ choice, onChoiceChange, preset, onPresetChange, custom, onCustomChange, errorMessage, onBack, onNext }) {
-  const optionStyle = (active) => ({
-    ...cardStyle,
-    padding: '0.85rem 1rem',
+  const presetButtonStyle = (active) => ({
     textAlign: 'left',
+    padding: '10px 12px',
+    borderRadius: 10,
+    border: active ? '1.5px solid var(--seal)' : '1px solid rgba(24,28,38,.18)',
+    background: active ? 'rgba(179,53,42,.1)' : 'rgba(255,255,255,.7)',
+    color: active ? 'var(--ink)' : 'var(--ink-dim)',
+    fontSize: 14,
     cursor: 'pointer',
-    border: `1px solid ${active ? colors.accent : colors.border}`,
-    background: active ? 'rgba(99,102,241,0.12)' : colors.card,
   })
 
   return (
     <div className="court-step transfer scroll">
-      <div className="warn mono">FINAL NOTICE</div>
-      <div className="tfTitle serif">移送聯繫</div>
+      <div className="warn mono">CASE FILING</div>
+      <div className="tfTitle serif">立案・審理議題</div>
       <div className="tfBody">
-        <p>問卷與證詞都已備妥。最後一步:在主系統前掃描畫面上的移送代碼（或手動輸入）,把資料移送過去建立連結。</p>
+        <p>你想在「內在法庭」審理什麼樣的個案?兩位克隆自我會圍繞這個議題激辯,你將以法官的身分聽審並介入。</p>
+      </div>
+
+      <div style={optionStyle(choice === 'auto')} onClick={() => onChoiceChange('auto')}>
+        <strong>依口供自動立案</strong>
+        <p style={{ margin: '5px 0 0', fontSize: 12.5, color: 'var(--ink-dim)' }}>
+          用剛剛「錄口供」時說的煩惱內容,由書記官自動整理出案由。
+        </p>
       </div>
 
       <div style={optionStyle(choice === 'preset')} onClick={() => onChoiceChange('preset')}>
-        <strong>從預設議題中選一個</strong>
+        <strong>從常見案由中選一個</strong>
         {choice === 'preset' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.6rem' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 10 }}>
             {PRESET_TOPICS.map((t) => (
               <button
                 key={t}
+                type="button"
                 onClick={(e) => { e.stopPropagation(); onPresetChange(t) }}
-                style={{
-                  ...secondaryButtonStyle,
-                  textAlign: 'left',
-                  border: `1px solid ${preset === t ? colors.accent : colors.border}`,
-                  color: preset === t ? colors.text : colors.textMuted,
-                }}
+                style={presetButtonStyle(preset === t)}
               >
                 {t}
               </button>
@@ -844,34 +882,26 @@ function TopicStep({ choice, onChoiceChange, preset, onPresetChange, custom, onC
       </div>
 
       <div style={optionStyle(choice === 'custom')} onClick={() => onChoiceChange('custom')}>
-        <strong>自己輸入</strong>
+        <strong>自行陳述案由</strong>
         {choice === 'custom' && (
           <input
+            className="fieldInput"
             value={custom}
             onChange={(e) => onCustomChange(e.target.value)}
             onClick={(e) => e.stopPropagation()}
-            placeholder="用一句話描述你的煩惱，例如「該不該離職去進修」"
-            style={{
-              marginTop: '0.6rem',
-              width: '100%',
-              boxSizing: 'border-box',
-              padding: '0.6rem 0.75rem',
-              borderRadius: '0.5rem',
-              border: `1px solid ${colors.border}`,
-              background: colors.bg,
-              color: colors.text,
-            }}
+            placeholder="用一句話描述你的煩惱,例如「該不該離職去進修」"
+            style={{ marginTop: 10, width: '100%', boxSizing: 'border-box' }}
           />
         )}
       </div>
 
-      {errorMessage && <p style={{ margin: 0, fontSize: '0.8rem', color: colors.danger }}>{errorMessage}</p>}
+      {errorMessage && <p className="errorNote">{errorMessage}</p>}
 
-      <button onClick={onNext} style={primaryButtonStyle(true)}>
-        下一步：連結上傳
+      <button type="button" className="btn enter" onClick={onNext} style={{ marginTop: 18 }}>
+        確認案由,前往移送
       </button>
-      <button onClick={onBack} style={secondaryButtonStyle}>
-        返回錄音
+      <button type="button" className="btn secondary" onClick={onBack}>
+        返回錄口供
       </button>
     </div>
   )
@@ -941,7 +971,8 @@ function TransferDoneStep({ dominantDim, linkedAgents, onViewResult }) {
       </div>
       <AgentWaveCanvas dim={dominantDim} />
       <div className="tfBody">
-        <p>請回到主系統畫面繼續,稍後即可選擇兩位「自我」agent 開始辯論。</p>
+        {/* v17 設計稿更新的移送文案 */}
+        <p>請收起手機,戴上 VR 頭盔——進入心智最高法院。在法庭裡,直面那些因你而起的混亂聲音。</p>
       </div>
 
       {linkedAgents.length > 0 && (
