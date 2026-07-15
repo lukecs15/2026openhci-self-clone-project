@@ -161,27 +161,132 @@ async def _run_debate_loop(
     直接用真正的 DebateOrchestrator（max_turns=1）單元測試「連最後一輪
     也會等前端 turn_played 才送出 debate_finished」這個修過的行為，見
     檔案開頭「達到回合上限那一輪也要等播完才送 debate_finished」說明。
+
+    ── 預生成下一輪（延遲優化，穿透式串流版）───────────────────────────
+    舊版流程是「這一輪播完（等 turn_played）→ 停頓 → 才開始生成下一輪」，
+    換人發言的空檔 = 下一輪完整的 LLM 首句 + TTS 首 chunk 延遲。現在改成：
+    這一輪事件釋出後**立刻**開始生成下一輪（_emit_turn），搭配一個
+    「釋出閘門」（release gate，由背景的 _open_release_gate 在收到
+    turn_played + 自然停頓之後打開）：
+
+      - 閘門還沒開：生成出來的事件先扣在本地 buffer。
+      - 閘門打開（不管生成到一半還是已生成完）：buffer 先倒出去，之後的
+        事件改為**直通串流**——跟第一輪一樣邊生成邊送。
+
+    這個「穿透」設計是實測修過的問題：第一版把投機輪做成「整輪生成完
+    才一次釋出」，在 TTS 生成比實際播放慢的機器上（生成 15 秒音訊要花
+    超過 15 秒），換人空檔變成「整輪生成時間 − 上一輪播放時間」，比舊版
+    「只等第一句生成」還要久。穿透式串流讓換人空檔 =
+    max(上一輪剩餘播放時間 + 停頓, 首句生成時間)，嚴格優於兩個舊版本。
+
+    投機生成的取消語意：只有「這一輪已完整生成、而且一個事件都還沒釋出」
+    （使用者完全沒聽到）時才用 `orchestrator.rollback_state()` 還原狀態，
+    避免插話後的接續回應與判決書參照一段使用者沒聽過的「幽靈發言」；
+    生成中途被取消時 run_next_turn() 本來就不寫入狀態（rollback 冪等），
+    已釋出部分事件的輪次則視同「正在播放中被打斷」，比照舊版行為不回滾。
+
+    turn_ack_event 的 clear 時機：某一輪事件全數釋出之後立刻清掉。前端
+    要等播完該輪（處理到 agent_speaking_end）才會送 turn_played，必然晚
+    於釋出當下，不會有 ack 被提早吃掉的競態；逾時後才遲到的舊 ack 也會
+    在下一輪釋出後被 clear 掉，不會被誤認成下一輪的回報。
     """
+    gate_opener: Optional[asyncio.Task] = None
     try:
-        while not orchestrator.is_finished:
-            async for event in orchestrator.run_next_turn():
-                event_queue.put_nowait(event)
-            # 不管這一輪是不是最後一輪，都要先等前端真的播完（見檔案開頭
-            # 說明）——刻意把這段等待放在 is_finished 判斷「之前」，這樣
-            # 即使這一輪剛好讓 turn_count 到達上限，也會等前端確認播完，
-            # debate_finished 才不會搶在音訊/朗讀播完前送出。
+        release_gate = asyncio.Event()
+        release_gate.set()  # 第一輪（含插話後重啟的第一輪）：立即直通串流
+        while True:
+            emitted_any = await _emit_turn(orchestrator, event_queue, release_gate)
+            if gate_opener is not None:
+                gate_opener.cancel()  # 正常情況已完成，這裡只是保險
+                gate_opener = None
+            if not emitted_any and orchestrator.is_finished:
+                break  # 重啟時就已達回合上限：沒有新事件，直接收尾
+
+            # 這一輪事件已全數釋出，接下來才會收到它的 turn_played：先歸零。
             turn_ack_event.clear()
-            await _wait_for_turn_ack(turn_ack_event, ack_timeout)
+
             if orchestrator.is_finished:
+                # 最後一輪也要等前端確認播完，debate_finished 才不會搶在
+                # 音訊播完前送出（見檔案開頭說明）。
+                await _wait_for_turn_ack(turn_ack_event, ack_timeout)
                 break
-            # 換人發言前留一小段自然停頓（也順便讓出控制權，讓剛好卡在
-            # 兩輪交界的暫停能被處理到）；已經結束就不需要這段停頓。
-            await asyncio.sleep(inter_turn_gap)
+
+            # 立刻開始生成下一輪（回到迴圈頂端的 _emit_turn），釋出時機
+            # 交給背景的 gate opener（等這一輪的 turn_played + 停頓）。
+            release_gate = asyncio.Event()
+            gate_opener = asyncio.create_task(
+                _open_release_gate(turn_ack_event, release_gate, ack_timeout, inter_turn_gap)
+            )
         event_queue.put_nowait({"type": "debate_finished"})
     except asyncio.CancelledError:
         event_queue.put_nowait(
             {"type": "debate_paused", "agent_id": orchestrator.current_speaker_id}
         )
+        raise
+    finally:
+        if gate_opener is not None and not gate_opener.done():
+            gate_opener.cancel()
+
+
+async def _open_release_gate(
+    turn_ack_event: asyncio.Event,
+    release_gate: asyncio.Event,
+    ack_timeout: float,
+    inter_turn_gap: float,
+) -> None:
+    """背景等待「上一輪播完（turn_played）＋自然停頓」後打開釋出閘門，
+    讓 _emit_turn 裡投機生成中的下一輪開始（穿透式）釋出事件。"""
+    await _wait_for_turn_ack(turn_ack_event, ack_timeout)
+    if inter_turn_gap > 0:
+        await asyncio.sleep(inter_turn_gap)
+    release_gate.set()
+
+
+async def _emit_turn(
+    orchestrator: DebateOrchestrator,
+    event_queue: "asyncio.Queue[Optional[dict]]",
+    release_gate: asyncio.Event,
+) -> bool:
+    """
+    生成一輪並釋出事件（穿透式串流，見 _run_debate_loop 的說明）：
+    release_gate 打開之前生成的事件扣在本地 buffer；打開之後（不管是
+    生成前、生成中還是生成完才開）buffer 先倒出、其餘直通串流。
+
+    回傳這一輪是否有任何事件（False = orchestrator 已達回合上限，
+    run_next_turn() 直接返回）。
+
+    取消語意：「已完整生成且一個事件都沒釋出」→ rollback（使用者沒聽
+    過這一輪）；其餘情況不回滾（生成中途取消本來就不寫入狀態；已釋出
+    部分事件視同播放中被打斷）。
+    """
+    buffer: list[dict] = []
+    emitted_any = False
+    released_any = False
+    generation_done = False
+    snapshot = orchestrator.snapshot_state()
+    try:
+        async for event in orchestrator.run_next_turn():
+            emitted_any = True
+            if release_gate.is_set():
+                for buffered in buffer:
+                    event_queue.put_nowait(buffered)
+                buffer.clear()
+                event_queue.put_nowait(event)
+                released_any = True
+            else:
+                buffer.append(event)
+        generation_done = True
+
+        if not release_gate.is_set():
+            await release_gate.wait()
+        for buffered in buffer:
+            event_queue.put_nowait(buffered)
+            released_any = True
+        buffer.clear()
+        return emitted_any
+    except asyncio.CancelledError:
+        if generation_done and not released_any:
+            orchestrator.rollback_state(snapshot)
         raise
 
 
@@ -359,3 +464,4 @@ async def voice_debate_endpoint(ws: WebSocket, session_id: str):
             await sender_task
         except asyncio.CancelledError:
             pass
+# （檔尾註解：預生成下一輪的行為測試見 tests/test_ws_debate.py）

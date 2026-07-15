@@ -119,6 +119,116 @@ async def test_run_debate_loop_waits_for_ack_even_on_final_turn(sample_agents):
 
 
 @pytest.mark.asyncio
+async def test_snapshot_rollback_restores_orchestrator_state(sample_agents):
+    """
+    投機生成的還原基礎：跑完一輪後 snapshot，再跑（投機）一輪，rollback
+    之後 history / turn_count / current_speaker_id 都要回到 snapshot 當下，
+    對「還沒投機」的狀態呼叫 rollback 也要是無害的（冪等）。
+    """
+    orchestrator = _build_debate(sample_agents, max_turns=6)
+    async for _ in orchestrator.run_next_turn():
+        pass
+
+    snapshot = orchestrator.snapshot_state()
+    history_len, turn_count, speaker_id = snapshot
+
+    # 冪等：沒有投機任何東西時 rollback 不改變狀態。
+    orchestrator.rollback_state(snapshot)
+    assert orchestrator.snapshot_state() == snapshot
+
+    # 投機一輪後 rollback：狀態完整還原。
+    async for _ in orchestrator.run_next_turn():
+        pass
+    assert orchestrator.turn_count == turn_count + 1
+    orchestrator.rollback_state(snapshot)
+    assert len(orchestrator.history) == history_len
+    assert orchestrator.turn_count == turn_count
+    assert orchestrator.current_speaker_id == speaker_id
+
+
+@pytest.mark.asyncio
+async def test_run_debate_loop_prefetch_holds_next_turn_until_ack(sample_agents):
+    """
+    預生成下一輪的核心行為：第一輪事件送出後，迴圈會在「前端還沒回報
+    turn_played」的情況下就先把下一輪生成好（turn_count 前進到 2），但
+    事件必須扣在 buffer 裡不能進 queue——queue 裡只能看到第一輪的
+    agent_speaking_start。
+    """
+    orchestrator = _build_debate(sample_agents, max_turns=6)
+    event_queue = asyncio.Queue()
+    turn_ack_event = asyncio.Event()  # 故意不 set：前端「一直在播第一輪」
+
+    task = asyncio.create_task(
+        _run_debate_loop(orchestrator, event_queue, turn_ack_event, ack_timeout=30.0, inter_turn_gap=0)
+    )
+    try:
+        # 等投機生成完成（turn_count 到 2 代表第二輪已經生成完、扣在 buffer）
+        for _ in range(500):
+            if orchestrator.turn_count >= 2:
+                break
+            await asyncio.sleep(0.01)
+        assert orchestrator.turn_count == 2
+
+        events = []
+        while not event_queue.empty():
+            events.append(event_queue.get_nowait())
+        starts = [e for e in events if e.get("type") == "agent_speaking_start"]
+        assert len(starts) == 1, "投機生成的第二輪事件不應該在 ack 之前釋出"
+
+        # 投機生成的深度上限是「一輪」：第二輪生成完後，第三輪在收到
+        # turn_played 之前絕對不能開始（_emit_turn 會卡在 release_gate，
+        # 迴圈不會前進到下一次生成）——不會在背後無限往後生、燒 API 額度。
+        await asyncio.sleep(0.3)
+        assert orchestrator.turn_count == 2, "不應該在沒有 ack 的情況下繼續生成第三輪"
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_run_debate_loop_cancel_discards_prefetched_turn(sample_agents):
+    """
+    插話取消時，投機生成（使用者沒聽過）的那一輪必須被整個丟棄：
+    turn_count 回到 1、history 裡沒有第二輪的發言——否則插話後的接續
+    回應與判決書會參照一段「幽靈發言」。
+    """
+    orchestrator = _build_debate(sample_agents, max_turns=6)
+    event_queue = asyncio.Queue()
+    turn_ack_event = asyncio.Event()  # 不 set：迴圈投機完會卡在等 ack
+
+    task = asyncio.create_task(
+        _run_debate_loop(orchestrator, event_queue, turn_ack_event, ack_timeout=30.0, inter_turn_gap=0)
+    )
+    for _ in range(500):
+        if orchestrator.turn_count >= 2:
+            break
+        await asyncio.sleep(0.01)
+    assert orchestrator.turn_count == 2
+
+    history_before_cancel = len(orchestrator.history)
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    assert orchestrator.turn_count == 1
+    assert len(orchestrator.history) == history_before_cancel - 1
+
+    events = []
+    while not event_queue.empty():
+        events.append(event_queue.get_nowait())
+    # 取消後照舊送出 debate_paused（前端據此顯示「已暫停」）。
+    assert events[-1] == {
+        "type": "debate_paused",
+        "agent_id": orchestrator.current_speaker_id,
+    }
+
+
+@pytest.mark.asyncio
 async def test_run_debate_loop_final_turn_finishes_promptly_once_ack_arrives(sample_agents):
     """
     對照組：如果前端很快就送出 turn_played（模擬正常播放完成），最後一輪

@@ -320,6 +320,33 @@ class DebateOrchestrator:
             }
         )
 
+    def snapshot_state(self) -> tuple:
+        """
+        投機生成（預生成下一輪）前呼叫：記下目前的對話狀態。
+
+        搭配 rollback_state() 使用，見 routers/ws_debate.py 的
+        「預生成下一輪」說明：_run_debate_loop 趁前端播放這一輪時就先生成
+        下一輪（事件扣在本地 buffer），如果使用者在下一輪「釋出之前」敲槌
+        插話，這輪投機生成的內容使用者根本沒聽到，必須整個丟棄——包含
+        run_next_turn() 成功跑完後寫進 history 的發言、遞增的 turn_count
+        與切換過的 current_speaker_id，否則插話後 LLM 會看到一段「幽靈
+        發言」（後端有記錄、使用者沒聽過），接續回應就對不上使用者的認知。
+        """
+        return (len(self.history), self.turn_count, self.current_speaker_id)
+
+    def rollback_state(self, snapshot: tuple) -> None:
+        """
+        丟棄投機生成的那一輪，把狀態還原到 snapshot_state() 當下。
+
+        冪等：投機那輪如果在生成中途就被取消（run_next_turn() 的既有保證
+        是中途取消不寫入任何狀態），這裡的還原不會有任何效果，重複呼叫
+        也安全。
+        """
+        history_len, turn_count, speaker_id = snapshot
+        del self.history[history_len:]
+        self.turn_count = turn_count
+        self.current_speaker_id = speaker_id
+
     def inject_user_message(self, text: str) -> None:
         """
         使用者插話：記錄進歷史。刻意不改變 current_speaker_id——插話發生在
@@ -547,3 +574,4 @@ class DebateOrchestrator:
                 "ttfb_ms": None,
                 "tts_error": str(exc),
             }
+# （檔尾註解：本檔案的投機生成 snapshot/rollback 支援見 snapshot_state()）
