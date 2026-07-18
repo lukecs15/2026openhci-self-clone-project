@@ -190,3 +190,37 @@ UI/          CourtHud.cs               統一 HUD（平滑跟隨頭部的 World 
   Unity 熱鍵 T 可無麥克風文字插話。
 - 已知限制清單（重連機制、ClientWebSocket 於 IL2CPP 未實測等）見後端 README
   第十一節與 `VR_SYSTEM_DESIGN.md` 第八章。
+
+---
+
+## 七、Final Web `voice_clone_final_web/`（React + Vite，port 5175，2026-07 新增）
+
+網頁版的三情境互動體驗（取代 Unity 作為展示端的另一條路線）：
+
+```
+connect  顯示 QR（/link?session=<id>）→ 手機掃碼填問卷+錄音（最後一題
+         改為「觀念問題」口述：人際關係 vs 個人責任的價值傾向）
+         → 輪詢 linked → 「五個自我甦醒」過場
+intro    情境導入（data/scenarios.js：三個情境的圖文與兩個立場設定，
+         目前為佔位 SVG，換正式素材只改這個檔）
+debate   兩顆「立場線條球」（Line Orbs，波形設計 v48 的 canvas 移植，
+         utils/lineOrbRenderer.js）輪流發言；介入 ×3（語音 user_intervene_audio
+         [16kHz WAV，utils/wavRecorder.js] 或文字 user_intervene）；
+         達回合上限（init 帶 max_turns）→ 選擇立場 → end_session 取 verdict
+（×3 情境）
+report   三情境聚合（utils/report.js）→ POST /result → 領取 QR → 手機
+         ResultPage 依 result.scenarios 自動切換三情境報告視圖
+```
+
+延遲/控時：完整沿用 voice_clone_frontend 的事件序列化管線 + turn_played
+真實回報（詳見 voice_clone_final_web/README.md），搭配後端既有的
+「預生成下一輪」穿透式串流，達成低延遲且後端永不超前的播放時序。
+
+立場 persona（utils/stancePersona.js）：純立場 agent（不挑 5 位自我），
+以 Big Five 摘要 + 使用者觀念問題口述逐字稿（voice_reference_text）+
+情境立場主張三者組 prompt，兩位共用同一顆克隆聲音。
+
+配套的後端擴充（皆向後相容）：
+- `OnboardingSession.voice_reference_text`：聲音樣本逐字稿隨 session 曝露
+- `OnboardingResult.scenarios`：三情境逐場報告聚合（留空＝舊單場流程）
+- `init_debate_session.max_turns`：逐場覆寫辯論回合上限

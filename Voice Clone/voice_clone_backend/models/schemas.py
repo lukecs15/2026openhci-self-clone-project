@@ -125,6 +125,21 @@ class OnboardingResult(BaseModel):
         default_factory=list,
         description="有參與這場對話/辯論的 agent 簡要資訊（agent_id/display_name/role_tag），供手機端顯示",
     )
+    # ── final web 三情境體驗（voice_clone_final_web）的聚合報告 ──────────
+    # 每個元素對應一個情境（依體驗順序），結構由 final web 組出：
+    #   { "scenario_id": "...", "title": 情境標題, "question": 兩難描述,
+    #     "choice_label": 使用者最後選擇的立場文字,
+    #     "choice_side": "a" | "b",
+    #     "stance_a": 立場A標籤, "stance_b": 立場B標籤,
+    #     "summary": 該情境討論摘要（verdict.final_verdict 或總結語）,
+    #     "interventions": [使用者每次介入說的話...],
+    #     "intervention_reflection": 介入思考變化摘要（verdict.judge_interventions 聚合）,
+    #     "verdict": 該情境的完整判決書 dict（可省略）}
+    # 留空（None）向後相容：單場辯論的舊流程（Unity/舊網頁版）不帶這個欄位，
+    # 手機 ResultPage 依欄位有無自動切換單場/三情境報告視圖。
+    scenarios: Optional[list[dict]] = Field(
+        None, description="三情境體驗的逐情境報告（final web 專用，留空=舊單場流程）"
+    )
 
 
 class OnboardingSession(BaseModel):
@@ -139,6 +154,11 @@ class OnboardingSession(BaseModel):
     # 主系統（Unity）載入後帶進辯論模式的 init_debate_session（topic_title）。
     topic_title: str = Field("", description="這場體驗要辯論的議題標題")
     voice_profile_id: str = Field("", description="這場對話使用的聲音克隆 profile id")
+    # 聲音樣本的 STT 逐字稿（voice_profile.reference_text）。手機端最後一題
+    # 錄音同時是「觀念問題」的口述回答（人際關係 vs 個人責任的價值傾向），
+    # final web 需要拿這段文字當作立場 persona 生成的參考，因此在 session
+    # 查詢時一併曝露，不用另外打 voice_profiles 端點。留空向後相容。
+    voice_reference_text: str = Field("", description="聲音樣本逐字稿（使用者價值觀口述，供立場生成參考）")
     agents: list[AgentConfig] = Field(default_factory=list, description="依 Big Five 分數生成的 5 位自我 agent")
     result: Optional[OnboardingResult] = Field(None, description="體驗結束後回寫的總結與融合波形")
     linked_at: str = Field("", description="問卷/聲音上傳完成時間（ISO 8601）")
@@ -384,6 +404,10 @@ class DebateClientMessage(BaseModel):
 
     type: DebateClientMessageType
     topic_id: Optional[str] = None
+    # 只有 init_debate_session 可帶：這一場的回合上限覆寫（final web 三情境
+    # 體驗每個情境的辯論較短，不想動全域 config 的 debate_max_turns）。
+    # 不帶或 <=0 時沿用 config.debate_max_turns，向後相容既有呼叫端。
+    max_turns: Optional[int] = None
     # topic_id == "custom" 時使用：自訂議題標題（例如手機 onboarding 傳來的
     # 使用者煩惱），後端用 agents/debate.py 的 build_custom_topic() 動態組出
     # DebateTopic，不需要事先存在 DEFAULT_DEBATE_TOPICS。

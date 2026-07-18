@@ -1,0 +1,454 @@
+/* styles.css — final web 全域樣式（深色沉浸風，對齊波形設計的 #05070d 底色） */
+
+:root {
+  --bg: #05070d;
+  --bg-panel: rgba(18, 24, 44, 0.72);
+  --fg: #e8ecf6;
+  --fg-dim: #8a94b8;
+  --fg-faint: #5a6690;
+  --accent: #8fd0ff;
+  --danger: #ff8a9a;
+  --radius: 14px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', sans-serif;
+}
+
+.appRoot {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+/* ── 共用 ─────────────────────────────────────────── */
+.btn {
+  appearance: none;
+  border: 1px solid rgba(143, 208, 255, 0.35);
+  background: rgba(143, 208, 255, 0.08);
+  color: var(--fg);
+  font-size: 16px;
+  padding: 12px 28px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+}
+.btn:hover:not(:disabled) {
+  background: rgba(143, 208, 255, 0.18);
+}
+.btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.btnPrimary {
+  background: rgba(143, 208, 255, 0.22);
+  font-size: 18px;
+  padding: 14px 44px;
+  align-self: center;
+}
+
+.errorNote {
+  color: var(--danger);
+  font-size: 14px;
+  text-align: center;
+  margin-top: 10px;
+}
+
+.stageKicker {
+  letter-spacing: 6px;
+  font-size: 13px;
+  color: var(--fg-faint);
+  text-transform: uppercase;
+  text-align: center;
+}
+
+/* ── ConnectGate ──────────────────────────────────── */
+.gate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding-top: 6vh;
+  text-align: center;
+}
+.gateTitle {
+  font-family: 'Noto Serif TC', serif;
+  font-size: 40px;
+  font-weight: 600;
+  margin: 0;
+  letter-spacing: 2px;
+}
+.gateSub {
+  color: var(--fg-dim);
+  font-size: 17px;
+  max-width: 560px;
+  line-height: 1.8;
+  margin: 0;
+}
+.gateQuote {
+  color: var(--accent);
+  font-family: 'Noto Serif TC', serif;
+  font-size: 17px;
+  max-width: 640px;
+  line-height: 1.8;
+  margin: 0;
+  opacity: 0.9;
+}
+.qrBox {
+  background: #fff;
+  padding: 14px;
+  border-radius: var(--radius);
+  line-height: 0;
+}
+.qrBox img {
+  display: block;
+}
+.qrBoxSmall {
+  padding: 10px;
+}
+.gateHint {
+  color: var(--fg-dim);
+  font-size: 16px;
+  line-height: 1.8;
+}
+.gateHintSmall {
+  color: var(--fg-faint);
+  font-size: 13px;
+}
+
+/* ── ScenarioIntro ────────────────────────────────── */
+.intro {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding-top: 4vh;
+  text-align: center;
+}
+.introTitle {
+  font-family: 'Noto Serif TC', serif;
+  font-size: 34px;
+  margin: 0;
+  letter-spacing: 4px;
+}
+.introImageWrap {
+  width: min(720px, 92vw);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.55);
+}
+.introImage {
+  width: 100%;
+  display: block;
+}
+.introDesc {
+  max-width: 680px;
+  color: var(--fg);
+  font-size: 17px;
+  line-height: 2;
+  margin: 0;
+  text-align: justify;
+}
+.introQuestion {
+  font-family: 'Noto Serif TC', serif;
+  font-size: 21px;
+  color: var(--accent);
+  margin: 4px 0 0;
+}
+.introHint {
+  color: var(--fg-faint);
+  font-size: 14px;
+  margin: 0;
+}
+
+/* ── DebateStage ──────────────────────────────────── */
+.stage {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.stageHeader {
+  text-align: center;
+  margin-bottom: 4px;
+}
+.stageTitle {
+  font-family: 'Noto Serif TC', serif;
+  font-size: 26px;
+  margin: 6px 0 2px;
+  letter-spacing: 3px;
+}
+.stageTopic {
+  color: var(--fg-dim);
+  font-size: 15px;
+}
+
+.captionArea {
+  min-height: 84px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8vw;
+}
+.caption {
+  font-size: 19px;
+  line-height: 1.9;
+  text-align: center;
+  margin: 0;
+  animation: captionIn 0.35s ease-out;
+}
+.captionSpeaker {
+  display: block;
+  font-size: 13px;
+  letter-spacing: 3px;
+  color: var(--fg-faint);
+  margin-bottom: 4px;
+}
+.captionUser .captionSpeaker {
+  color: var(--accent);
+}
+.captionClosing {
+  font-family: 'Noto Serif TC', serif;
+  color: var(--accent);
+}
+.captionHint {
+  color: var(--fg-faint);
+  font-size: 15px;
+  text-align: center;
+  animation: pulse 2.4s ease-in-out infinite;
+}
+@keyframes captionIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.controlBar {
+  display: flex;
+  justify-content: center;
+  margin-top: 6px;
+}
+.btnIntervene {
+  border-color: rgba(255, 217, 138, 0.45);
+  background: rgba(255, 217, 138, 0.08);
+}
+.btnIntervene:hover:not(:disabled) {
+  background: rgba(255, 217, 138, 0.18);
+}
+
+/* 介入面板 */
+.intervenePanel {
+  background: var(--bg-panel);
+  border: 1px solid rgba(143, 208, 255, 0.18);
+  border-radius: var(--radius);
+  padding: 22px 26px;
+  margin: 8px auto 0;
+  width: min(560px, 94%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  backdrop-filter: blur(6px);
+}
+.intervenePanelTitle {
+  font-size: 16px;
+  color: var(--fg-dim);
+}
+.btnHold {
+  font-size: 18px;
+  padding: 16px 48px;
+  border-color: rgba(143, 208, 255, 0.5);
+  user-select: none;
+  touch-action: none;
+}
+.btnHoldActive {
+  background: rgba(143, 208, 255, 0.3);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+.interveneTextRow {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+.interveneTextRow input {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  color: var(--fg);
+  font-size: 15px;
+  padding: 10px 14px;
+  outline: none;
+}
+.interveneTextRow input:focus {
+  border-color: rgba(143, 208, 255, 0.5);
+}
+
+/* 選擇面板 */
+.choicePanel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  margin-top: 10px;
+  animation: captionIn 0.5s ease-out;
+}
+.choicePanelTitle {
+  font-family: 'Noto Serif TC', serif;
+  font-size: 20px;
+  color: var(--fg);
+}
+.choiceButtons {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.btnChoice {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 18px 30px;
+  border-radius: var(--radius);
+  min-width: 260px;
+  border-color: hsla(var(--choice-hue), 70%, 65%, 0.5);
+  background: hsla(var(--choice-hue), 70%, 55%, 0.1);
+}
+.btnChoice:hover:not(:disabled) {
+  background: hsla(var(--choice-hue), 70%, 55%, 0.22);
+}
+.choiceStance {
+  font-size: 13px;
+  letter-spacing: 3px;
+  color: hsla(var(--choice-hue), 75%, 75%, 1);
+}
+.choiceLabel {
+  font-size: 17px;
+}
+
+/* ── ReportView ───────────────────────────────────── */
+.report {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  padding-top: 3vh;
+}
+.reportTitle {
+  font-family: 'Noto Serif TC', serif;
+  font-size: 32px;
+  margin: 0;
+  letter-spacing: 4px;
+}
+.reportClosing {
+  font-family: 'Noto Serif TC', serif;
+  color: var(--accent);
+  font-size: 18px;
+  max-width: 640px;
+  text-align: center;
+  line-height: 1.9;
+  margin: 0;
+}
+.reportCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+  width: 100%;
+}
+.reportCard {
+  background: var(--bg-panel);
+  border: 1px solid rgba(143, 208, 255, 0.14);
+  border-radius: var(--radius);
+  padding: 20px 22px;
+}
+.reportCardTitle {
+  font-family: 'Noto Serif TC', serif;
+  font-size: 20px;
+  margin: 8px 0 12px;
+  text-align: center;
+}
+.reportFields {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.reportFields dt {
+  font-size: 12px;
+  letter-spacing: 3px;
+  color: var(--fg-faint);
+  margin-bottom: 4px;
+}
+.reportFields dd {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.8;
+  color: var(--fg);
+}
+.reportChoice {
+  color: var(--accent);
+  font-weight: 600;
+}
+.reportQrSection {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+.reportQrSection h3 {
+  font-family: 'Noto Serif TC', serif;
+  font-weight: 500;
+  margin: 8px 0 0;
+}
+
+/* ── 低干擾的「提前選擇」按鈕（DebateStage 實測回饋新增）───────────
+   跟介入按鈕同型的實體膠囊按鈕，但整顆高透明（opacity 0.3，隱約可見、
+   不干擾體驗），hover 時透明度調低（變清楚）提示可以按。 */
+.controlBar {
+  gap: 16px;
+  align-items: center;
+}
+.btnSkip {
+  opacity: 0.3;
+  border-color: rgba(138, 148, 184, 0.5);
+  background: rgba(138, 148, 184, 0.08);
+  transition: opacity 0.25s, background 0.2s;
+}
+.btnSkip:hover:not(:disabled) {
+  opacity: 1;
+  background: rgba(138, 148, 184, 0.16);
+}
+.btnSkip:disabled {
+  opacity: 0.15;
+}

@@ -116,6 +116,10 @@ function ReadyView({ result }) {
   const signature = result.waveform_signature || FALLBACK_SIGNATURE
   const participantNames = (result.participant_agents || []).map((a) => a.display_name).filter(Boolean)
   const verdict = result.verdict || null
+  // final web 三情境體驗的聚合報告（見後端 schemas.py 的 OnboardingResult
+  // .scenarios 說明）：有這個欄位就改走三情境報告視圖；沒有（Unity/舊
+  // 網頁版單場流程）照舊顯示單份判決書，向後相容。
+  const scenarios = Array.isArray(result.scenarios) ? result.scenarios : []
 
   return (
     <div
@@ -146,8 +150,10 @@ function ReadyView({ result }) {
           gap: '1.25rem',
         }}
       >
-        {verdict && (
-          <VerdictDocument verdict={verdict} topicTitle={result.topic_title} />
+        {scenarios.length > 0 ? (
+          <ScenariosDocument scenarios={scenarios} />
+        ) : (
+          verdict && <VerdictDocument verdict={verdict} topicTitle={result.topic_title} />
         )}
 
         <p
@@ -169,6 +175,76 @@ function ReadyView({ result }) {
           </p>
         )}
       </div>
+    </div>
+  )
+}
+
+/**
+ * ScenariosDocument — final web 三情境體驗的逐情境報告
+ *
+ * 對照後端 OnboardingResult.scenarios 的結構（每情境：選擇、討論摘要、
+ * 介入思考變化）。視覺沿用 VerdictDocument 的紙本文書風格。
+ */
+function ScenariosDocument({ scenarios }) {
+  const sectionTitleStyle = {
+    margin: '0 0 0.25rem',
+    fontSize: '0.72rem',
+    letterSpacing: '0.15em',
+    color: 'rgba(226,215,180,0.85)',
+  }
+  const sectionBodyStyle = {
+    margin: 0,
+    fontSize: '0.9rem',
+    lineHeight: 1.75,
+    color: 'rgba(248,250,252,0.92)',
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%', maxWidth: '440px' }}>
+      <p style={{ margin: 0, textAlign: 'center', fontSize: '1.05rem', letterSpacing: '0.25em', color: '#e8dcb4' }}>
+        內在對話 體驗報告
+      </p>
+      {scenarios.map((s, i) => (
+        <div
+          key={s.scenario_id || i}
+          style={{
+            textAlign: 'left',
+            background: 'rgba(10,12,20,0.78)',
+            border: '1px solid rgba(226,215,180,0.35)',
+            borderRadius: '0.9rem',
+            padding: '1.2rem 1.25rem',
+            backdropFilter: 'blur(6px)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.85rem',
+          }}
+        >
+          <div style={{ textAlign: 'center' }}>
+            <p style={{ margin: 0, fontSize: '0.72rem', letterSpacing: '0.3em', color: 'rgba(226,232,240,0.6)' }}>
+              情境 {i + 1}
+            </p>
+            <p style={{ margin: '0.25rem 0 0', fontSize: '1rem', color: '#f1f5f9' }}>{s.title}</p>
+          </div>
+          {s.choice_label && (
+            <div>
+              <p style={sectionTitleStyle}>你的選擇</p>
+              <p style={{ ...sectionBodyStyle, color: '#c7e3ff' }}>{s.choice_label}</p>
+            </div>
+          )}
+          {s.summary && (
+            <div>
+              <p style={sectionTitleStyle}>討論摘要</p>
+              <p style={sectionBodyStyle}>{s.summary}</p>
+            </div>
+          )}
+          {s.intervention_reflection && (
+            <div>
+              <p style={sectionTitleStyle}>你介入時的思考</p>
+              <p style={sectionBodyStyle}>{s.intervention_reflection}</p>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   )
 }

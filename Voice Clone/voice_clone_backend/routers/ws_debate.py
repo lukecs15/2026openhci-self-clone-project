@@ -350,7 +350,12 @@ async def voice_debate_endpoint(ws: WebSocket, session_id: str):
                     continue
 
                 session = build_debate_session(
-                    session_id=session_id, agent_a=agents[0], agent_b=agents[1], topic=topic
+                    session_id=session_id,
+                    agent_a=agents[0],
+                    agent_b=agents[1],
+                    topic=topic,
+                    # final web 三情境體驗可逐場覆寫回合上限（不帶=沿用 config）
+                    max_turns=msg.max_turns,
                 )
                 await _send(
                     ws,

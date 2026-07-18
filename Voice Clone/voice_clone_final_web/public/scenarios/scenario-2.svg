@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450">
+  <!-- 佔位圖：深夜街道的阿嬤（正式圖請放 public/scenarios/scenario-2.jpg） -->
+  <defs>
+    <radialGradient id="street" cx="0.35" cy="0.3" r="0.8">
+      <stop offset="0" stop-color="#141b33"/>
+      <stop offset="1" stop-color="#05070d"/>
+    </radialGradient>
+    <radialGradient id="lamp2" cx="0.5" cy="0" r="1">
+      <stop offset="0" stop-color="#ffd98a" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#ffd98a" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="800" height="450" fill="url(#street)"/>
+  <!-- 路燈 -->
+  <rect x="248" y="80" width="6" height="240" fill="#1d2440"/>
+  <ellipse cx="251" cy="82" rx="26" ry="10" fill="#2a3355"/>
+  <path d="M 251 90 L 150 330 L 352 330 Z" fill="url(#lamp2)"/>
+  <!-- 地面 -->
+  <rect x="0" y="320" width="800" height="130" fill="#0d101f"/>
+  <line x1="0" y1="320" x2="800" y2="320" stroke="#232c4d" stroke-width="2"/>
+  <!-- 阿嬤剪影（跌坐、手撐地） -->
+  <g fill="#241f38">
+    <circle cx="252" cy="272" r="17"/>
+    <path d="M 236 288 q 14 -12 34 0 l 10 34 q -30 14 -56 2 z"/>
+    <rect x="270" y="308" width="34" height="9" rx="4" transform="rotate(18 270 308)"/>
+  </g>
+  <!-- 散落的東西 -->
+  <g fill="#33406b">
+    <circle cx="308" cy="330" r="5"/>
+    <rect x="322" y="322" width="20" height="12" rx="2" transform="rotate(-14 322 322)"/>
+    <circle cx="222" cy="336" r="4"/>
+  </g>
+  <!-- 捷運站方向 -->
+  <g transform="translate(640 210)">
+    <rect x="-60" y="-30" width="120" height="60" rx="8" fill="#101830" stroke="#2a3a66" stroke-width="2"/>
+    <text x="0" y="-2" text-anchor="middle" font-size="16" fill="#8fd0ff" font-family="sans-serif">捷運 →</text>
+    <text x="0" y="20" text-anchor="middle" font-size="11" fill="#5a6690">末班車前</text>
+  </g>
+  <text x="400" y="430" text-anchor="middle" font-size="13" fill="#5a6690" font-family="serif" letter-spacing="4">晚上十一點，安靜的街道</text>
+</svg>

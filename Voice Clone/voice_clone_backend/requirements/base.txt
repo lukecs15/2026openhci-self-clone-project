@@ -41,3 +41,8 @@ qrcode[pil]>=7.4.0
 # 測試
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
+
+# 繁體 → 簡體轉換（services/zh_convert.py：CosyVoice 合成前把 text/prompt_text
+# 轉成簡體，簡體的字音覆蓋率較好，特殊繁體字才不會發音不標準；字幕仍為繁體。
+# 沒安裝時優雅降級為原文直出，不會讓 TTS 失敗，但建議兩環境都裝）
+opencc-python-reimplemented>=0.1.7

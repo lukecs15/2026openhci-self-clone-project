@@ -443,6 +443,17 @@ class CosyVoiceModelServer:
                 )
             prompt_wav, prompt_text = self._default_prompt()
 
+        # 繁體 → 簡體（services/zh_convert.py）：CosyVoice 在簡體上的字音
+        # 覆蓋率較好，特殊繁體字直接餵會發音不標準。只影響送進模型的文字，
+        # 前端字幕（agent_speaking_chunk.text）仍是 LLM 原本的繁體輸出。
+        # prompt_text（參考音訊逐字稿）一併轉換，讓 prompt 與合成文字的
+        # 字形分佈一致，zero-shot 對齊更穩。注意要在補 <|endofprompt|>
+        # 標記「之前」轉換（OpenCC 只動漢字，但保險起見維持這個順序）。
+        from services.zh_convert import to_simplified
+
+        text = to_simplified(text)
+        prompt_text = to_simplified(prompt_text)
+
         if self._model_version == "cosyvoice3" and _COSYVOICE3_ENDOFPROMPT_PREFIX not in prompt_text:
             # CosyVoice3LM.inference() 會 assert prompt_text/text 裡一定要有
             # <|endofprompt|>，不管 prompt_text 是預設音色還是使用者上傳的

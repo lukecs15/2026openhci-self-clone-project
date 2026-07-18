@@ -64,6 +64,7 @@ class OnboardingSessionService:
         agents: list[AgentConfig],
         *,
         topic_title: str = "",
+        voice_reference_text: str = "",
         allow_relink: bool = False,
     ) -> OnboardingSession:
         """
@@ -86,6 +87,7 @@ class OnboardingSessionService:
             big_five_scores=big_five_scores,
             topic_title=topic_title,
             voice_profile_id=voice_profile_id,
+            voice_reference_text=voice_reference_text,
             agents=agents,
             result=None,
             linked_at=datetime.now(timezone.utc).isoformat(),

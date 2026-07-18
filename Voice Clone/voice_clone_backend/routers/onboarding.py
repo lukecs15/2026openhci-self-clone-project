@@ -126,6 +126,9 @@ async def link_onboarding_session(
             voice_profile_id=voice_profile.profile_id,
             agents=agents,
             topic_title=topic_title,
+            # 聲音樣本逐字稿＝使用者對「觀念問題」的口述回答，final web
+            # 生成立場 persona 時需要（見 models/schemas.py 的說明）。
+            voice_reference_text=voice_profile.reference_text or "",
         )
     except OnboardingSessionAlreadyLinkedError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))

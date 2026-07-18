@@ -95,6 +95,7 @@ def build_debate_session(
     tts_service: Optional[TTSService] = None,
     stt_service: Optional[STTService] = None,
     pacing_sleep_fn: Optional[Callable[[float], Awaitable[Any]]] = None,
+    max_turns: Optional[int] = None,
 ) -> DebateSession:
     """
     依 config.py 目前的設定組裝一個 DebateSession，並呼叫 open_debate()
@@ -116,7 +117,9 @@ def build_debate_session(
         topic=topic,
         llm_service=llm_service or _resolve_default_llm_service(settings),
         tts_service=tts_service or get_tts_service(),
-        max_turns=settings.debate_max_turns,
+        # 呼叫端（例如 final web 三情境體驗的 init_debate_session）可逐場
+        # 覆寫回合上限；不帶或 <=0 時沿用全域 config 的 debate_max_turns。
+        max_turns=max_turns if (max_turns and max_turns > 0) else settings.debate_max_turns,
         max_pacing_seconds=settings.debate_max_pacing_seconds,
         pacing_sleep_fn=pacing_sleep_fn,
     )

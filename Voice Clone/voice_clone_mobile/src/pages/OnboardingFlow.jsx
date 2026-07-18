@@ -107,7 +107,12 @@ const QUIPS = [
   '沒有標準答案,只有你的答案。',
 ]
 
-const TESTIMONY_PROMPT = '請親口說出:最近最卡關、最焦慮、或最想逃避的事——那件具體的煩惱,是什麼?'
+// final web 三情境體驗：最後一題錄音同時是「觀念問題」的口述回答——這段
+// 錄音一方面當聲音克隆樣本，一方面 STT 逐字稿會被當作使用者的價值傾向，
+// 餵給兩個立場 persona 引用/挑戰（見 voice_clone_final_web/src/utils/
+// stancePersona.js 與後端 OnboardingSession.voice_reference_text）。
+const TESTIMONY_PROMPT =
+  '請親口回答:當「人際關係」與「個人責任」發生時間衝突時,你傾向「配合他人」還是「堅持自我需求」?請簡述你的決策理由。'
 
 function formatElapsed(ms) {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000))
@@ -1035,7 +1040,7 @@ function ResultScanStep({ sessionId, onSessionIdChange, mode, onModeChange, onDe
         查看結果
       </button>
       <button type="button" className="btn secondary" onClick={onBack}>
-        返回上一步
+        返回
       </button>
     </div>
   )

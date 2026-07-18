@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 450">
+  <!-- 佔位圖：工作坊深夜（正式圖請放 public/scenarios/scenario-1.jpg） -->
+  <rect width="800" height="450" fill="#0b0e18"/>
+  <!-- 投影幕 -->
+  <rect x="290" y="40" width="330" height="180" rx="6" fill="#1a2136"/>
+  <!-- 白板便利貼 -->
+  <g>
+    <rect x="70" y="70" width="170" height="220" rx="8" fill="#26406b"/>
+    <g fill="#f0e6b0">
+      <rect x="88" y="92" width="40" height="34" rx="3"/>
+      <rect x="140" y="104" width="40" height="34" rx="3"/>
+      <rect x="96" y="150" width="40" height="34" rx="3"/>
+      <rect x="152" y="162" width="40" height="34" rx="3"/>
+      <rect x="110" y="214" width="40" height="34" rx="3"/>
+    </g>
+  </g>
+  <!-- 桌與筆電剪影 -->
+  <rect x="60" y="320" width="680" height="18" rx="8" fill="#241d33"/>
+  <g fill="#141a2e">
+    <path d="M 150 320 l 70 -46 h 8 l 0 46 z"/>
+    <path d="M 380 320 l 70 -50 h 8 l 0 50 z"/>
+    <path d="M 590 320 l 70 -44 h 8 l 0 44 z"/>
+  </g>
+  <!-- 圍坐的隊友剪影 -->
+  <g fill="#1c1730">
+    <circle cx="130" cy="272" r="22"/><rect x="102" y="294" width="56" height="26" rx="12"/>
+    <circle cx="330" cy="264" r="24"/><rect x="300" y="288" width="60" height="32" rx="14"/>
+    <circle cx="540" cy="270" r="22"/><rect x="512" y="292" width="56" height="28" rx="12"/>
+  </g>
+  <!-- 手錶時間 -->
+  <g transform="translate(680 120)">
+    <rect x="-46" y="-58" width="92" height="116" rx="22" fill="#10142a" stroke="#3a4a7a" stroke-width="3"/>
+    <text x="0" y="-4" text-anchor="middle" font-size="26" fill="#cfe4ff" font-family="monospace">22:28</text>
+    <text x="0" y="26" text-anchor="middle" font-size="11" fill="#7d89ad">七週年・今天</text>
+  </g>
+  <!-- 手機訊息 -->
+  <g transform="translate(400 392)">
+    <rect x="-190" y="-24" width="380" height="48" rx="24" fill="#182038"/>
+    <text x="0" y="6" text-anchor="middle" font-size="16" fill="#aab6d8" font-family="serif">「你大概幾點會結束？」</text>
+  </g>
+  <text x="400" y="440" text-anchor="middle" font-size="13" fill="#5a6690" font-family="serif" letter-spacing="4">晚上十點半，工作仍未結束</text>
+</svg>
