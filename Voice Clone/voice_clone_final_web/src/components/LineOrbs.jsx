@@ -19,7 +19,7 @@
 import { useEffect, useRef } from 'react'
 import { ORB_CONFIG, ORB_STYLES, drawOrb, hsbToRgba } from '../utils/lineOrbRenderer'
 
-export default function LineOrbs({ orbs, speakStateRef, height = 420 }) {
+export default function LineOrbs({ orbs, speakStateRef, height = 420, transparent = false }) {
   const canvasRef = useRef(null)
   const orbsRef = useRef(orbs)
   orbsRef.current = orbs
@@ -53,8 +53,13 @@ export default function LineOrbs({ orbs, speakStateRef, height = 420 }) {
       const speakState = speakStateRef?.current || {}
 
       ctx.globalCompositeOperation = 'source-over'
-      ctx.fillStyle = ORB_CONFIG.bg
-      ctx.fillRect(0, 0, wCss, hCss)
+      if (transparent) {
+        // 辯論頁：透明底，讓後面的情境影片背景透出（VR 感）
+        ctx.clearRect(0, 0, wCss, hCss)
+      } else {
+        ctx.fillStyle = ORB_CONFIG.bg
+        ctx.fillRect(0, 0, wCss, hCss)
+      }
 
       const S = Math.min(wCss, hCss)
       const R = ORB_CONFIG.orbRadius * S
@@ -109,12 +114,13 @@ export default function LineOrbs({ orbs, speakStateRef, height = 420 }) {
       cancelAnimationFrame(raf)
       window.removeEventListener('resize', resize)
     }
-  }, [speakStateRef])
+  }, [speakStateRef, transparent])
 
   return (
     <canvas
       ref={canvasRef}
-      style={{ width: '100%', height: `${height}px`, display: 'block' }}
+      className={transparent ? undefined : 'orbCanvas'}
+      style={{ width: '100%', height: `${height}px`, display: 'block'}}
       aria-label="立場克隆形象波形視覺"
     />
   )

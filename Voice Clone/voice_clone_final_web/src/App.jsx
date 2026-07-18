@@ -10,13 +10,14 @@
  * 後端 onboarding 流程的設計一致：主系統一場體驗一個 id）。
  */
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import ConnectGate from './components/ConnectGate'
 import ScenarioIntro from './components/ScenarioIntro'
 import DebateStage from './components/DebateStage'
 import ReportView from './components/ReportView'
 import { SCENARIOS } from './data/scenarios'
+import { preloadScenarioImages } from './utils/preloadAssets'
 
 function resolveSessionId() {
   if (typeof window === 'undefined') return uuidv4()
@@ -32,6 +33,12 @@ export default function App() {
   const [records, setRecords] = useState([])
 
   const scenario = SCENARIOS[scenarioIndex] || null
+
+  // 掛載即預載三個情境的圖片（使用者掃 QR/填問卷的空檔就下載完），
+  // 進入情境頁時直接命中快取，不會有「圖片慢半拍浮出來」的等待感。
+  useEffect(() => {
+    preloadScenarioImages(SCENARIOS)
+  }, [])
 
   const handleLinked = (linkedSession) => {
     setSession(linkedSession)

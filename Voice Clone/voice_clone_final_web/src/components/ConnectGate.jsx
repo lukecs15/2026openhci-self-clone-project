@@ -73,6 +73,8 @@ export default function ConnectGate({ sessionId, onLinked }) {
   return (
     <div className="gate">
       <h1 className="gateTitle">你的五個自我，已經甦醒</h1>
+      {/* 深色圓角窗：頁面維持白底，光球區塊用深底（加法發光需要深色
+          背景才看得清楚，樣式見 styles.css 的 .orbCanvas） */}
       <LineOrbs orbs={FIVE_SELVES} speakStateRef={idleSpeakRef} height={340} />
       <p className="gateSub">
         接下來，你會走進三個情境。每個情境裡，兩個立場的「你」會用你的聲音彼此說服——

@@ -13,8 +13,18 @@ export function buildInitDebateSessionMessage(topicTitle, agents, maxTurns) {
   return msg
 }
 
-export function buildPauseDebateMessage() {
-  return { type: 'pause_debate' }
+/**
+ * @param {string} [heardAgentId] 被打斷那一輪的 agent id
+ * @param {string[]} [heardTexts] 該輪「前端實際已顯示」的句子（介入核對用，
+ *   後端據此把對話歷史修剪成使用者真正看到的內容；不帶 = 後端行為不變）
+ */
+export function buildPauseDebateMessage(heardAgentId, heardTexts) {
+  const msg = { type: 'pause_debate' }
+  if (heardAgentId && Array.isArray(heardTexts)) {
+    msg.agent_id = heardAgentId
+    msg.heard_texts = heardTexts
+  }
+  return msg
 }
 
 /** 文字插話。 */

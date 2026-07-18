@@ -1,13 +1,22 @@
 /* styles.css — final web 全域樣式（深色沉浸風，對齊波形設計的 #05070d 底色） */
 
 :root {
-  --bg: #05070d;
-  --bg-panel: rgba(18, 24, 44, 0.72);
-  --fg: #e8ecf6;
-  --fg-dim: #8a94b8;
-  --fg-faint: #5a6690;
-  --accent: #8fd0ff;
-  --danger: #ff8a9a;
+  /* 紙白色系（對齊 voice_clone_mobile 的 court.css：--bg/--ink/--hair）。
+     例外：LineOrbs 的線條球是「加法發光」視覺，白底會整片褪白，canvas
+     保留深色底（utils/lineOrbRenderer.js 的 ORB_CONFIG.bg = #262626），
+     在紙白頁面上呈現為一塊深色圓角的「內在世界」窗口。 */
+  --bg: #f2f3f5;
+  --bg-panel: rgba(255, 255, 255, 0.75);
+  /* 注意：--fg/--fg-dim 是「紙白底上的文字色」，必須跟 --bg 拉開對比
+     （曾發生過被改成與背景同色 #f2f3f5，全站文字直接隱形）。
+     深色場景（影片背景）的淺色文字不要動這裡，已由 .stageOnVideo
+     範疇覆寫（覺醒頁已改回白底深字，走預設主題）。 */
+  --fg: rgba(24, 28, 38, 0.92);
+  --fg-dim: rgba(24, 28, 38, 0.55);
+  --fg-faint: rgba(24, 28, 38, 0.38);
+  --hair: rgba(24, 28, 38, 0.15);
+  --accent: hsl(200, 75%, 32%);
+  --danger: #b3352a;
   --radius: 14px;
 }
 
@@ -38,8 +47,8 @@ body,
 /* ── 共用 ─────────────────────────────────────────── */
 .btn {
   appearance: none;
-  border: 1px solid rgba(143, 208, 255, 0.35);
-  background: rgba(143, 208, 255, 0.08);
+  border: 1px solid rgba(31, 106, 165, 0.5);
+  background: rgba(31, 106, 165, 0.08);
   color: var(--fg);
   font-size: 16px;
   padding: 12px 28px;
@@ -48,7 +57,7 @@ body,
   transition: background 0.2s, transform 0.1s;
 }
 .btn:hover:not(:disabled) {
-  background: rgba(143, 208, 255, 0.18);
+  background: rgba(31, 106, 165, 0.18);
 }
 .btn:active:not(:disabled) {
   transform: scale(0.97);
@@ -58,7 +67,7 @@ body,
   cursor: default;
 }
 .btnPrimary {
-  background: rgba(143, 208, 255, 0.22);
+  background: rgba(31, 106, 165, 0.22);
   font-size: 18px;
   padding: 14px 44px;
   align-self: center;
@@ -113,6 +122,7 @@ body,
 }
 .qrBox {
   background: #fff;
+  border: 1px solid var(--hair);
   padding: 14px;
   border-radius: var(--radius);
   line-height: 0;
@@ -152,9 +162,13 @@ body,
   width: min(720px, 92vw);
   border-radius: var(--radius);
   overflow: hidden;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.55);
+  box-shadow: 0 10px 32px rgba(24, 28, 38, 0.16);
 }
 .introImage {
+  width: 100%;
+  display: block;
+}
+.introVideo {
   width: 100%;
   display: block;
 }
@@ -193,6 +207,7 @@ body,
   font-size: 26px;
   margin: 6px 0 2px;
   letter-spacing: 3px;
+  color: var(--fg-dim);
 }
 .stageTopic {
   color: var(--fg-dim);
@@ -259,17 +274,17 @@ body,
   margin-top: 6px;
 }
 .btnIntervene {
-  border-color: rgba(255, 217, 138, 0.45);
-  background: rgba(255, 217, 138, 0.08);
+  border-color: rgba(176, 122, 15, 0.45);
+  background: rgba(176, 122, 15, 0.08);
 }
 .btnIntervene:hover:not(:disabled) {
-  background: rgba(255, 217, 138, 0.18);
+  background: rgba(176, 122, 15, 0.18);
 }
 
 /* 介入面板 */
 .intervenePanel {
   background: var(--bg-panel);
-  border: 1px solid rgba(143, 208, 255, 0.18);
+  border: 1px solid rgba(31, 106, 165, 0.18);
   border-radius: var(--radius);
   padding: 22px 26px;
   margin: 8px auto 0;
@@ -287,12 +302,12 @@ body,
 .btnHold {
   font-size: 18px;
   padding: 16px 48px;
-  border-color: rgba(143, 208, 255, 0.5);
+  border-color: rgba(31, 106, 165, 0.5);
   user-select: none;
   touch-action: none;
 }
 .btnHoldActive {
-  background: rgba(143, 208, 255, 0.3);
+  background: rgba(31, 106, 165, 0.3);
   animation: pulse 1.2s ease-in-out infinite;
 }
 .interveneTextRow {
@@ -302,8 +317,8 @@ body,
 }
 .interveneTextRow input {
   flex: 1;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: #ffffff;
+  border: 1px solid rgba(24, 28, 38, 0.22);
   border-radius: 10px;
   color: var(--fg);
   font-size: 15px;
@@ -311,7 +326,7 @@ body,
   outline: none;
 }
 .interveneTextRow input:focus {
-  border-color: rgba(143, 208, 255, 0.5);
+  border-color: rgba(31, 106, 165, 0.5);
 }
 
 /* 選擇面板 */
@@ -341,7 +356,7 @@ body,
   padding: 18px 30px;
   border-radius: var(--radius);
   min-width: 260px;
-  border-color: hsla(var(--choice-hue), 70%, 65%, 0.5);
+  border-color: hsla(var(--choice-hue), 60%, 40%, 0.5);
   background: hsla(var(--choice-hue), 70%, 55%, 0.1);
 }
 .btnChoice:hover:not(:disabled) {
@@ -350,7 +365,7 @@ body,
 .choiceStance {
   font-size: 13px;
   letter-spacing: 3px;
-  color: hsla(var(--choice-hue), 75%, 75%, 1);
+  color: hsla(var(--choice-hue), 60%, 32%, 1);
 }
 .choiceLabel {
   font-size: 17px;
@@ -387,7 +402,7 @@ body,
 }
 .reportCard {
   background: var(--bg-panel);
-  border: 1px solid rgba(143, 208, 255, 0.14);
+  border: 1px solid rgba(31, 106, 165, 0.14);
   border-radius: var(--radius);
   padding: 20px 22px;
 }
@@ -441,14 +456,254 @@ body,
 }
 .btnSkip {
   opacity: 0.3;
-  border-color: rgba(138, 148, 184, 0.5);
-  background: rgba(138, 148, 184, 0.08);
+  border-color: rgba(24, 28, 38, 0.5);
+  background: rgba(24, 28, 38, 0.08);
   transition: opacity 0.25s, background 0.2s;
 }
 .btnSkip:hover:not(:disabled) {
   opacity: 1;
-  background: rgba(138, 148, 184, 0.16);
+  background: rgba(24, 28, 38, 0.16);
 }
 .btnSkip:disabled {
   opacity: 0.15;
+}
+
+/* ── 對話紀錄：隱藏式抽屜（TranscriptPanel）──────────
+   主舞台維持置中；右緣直立籤（低干擾：半透明、hover 顯形），點擊滑出抽屜 */
+.transcriptTab {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 40;
+  appearance: none;
+  border: 1px solid rgba(31, 106, 165, 0.4);
+  border-right: none;
+  border-radius: 10px 0 0 10px;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--fg-dim);
+  font-size: 13px;
+  letter-spacing: 6px;
+  writing-mode: vertical-rl;
+  padding: 18px 8px 12px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.25s, background 0.2s, right 0.3s ease, color 0.2s;
+  backdrop-filter: blur(4px);
+}
+.transcriptTab:hover {
+  opacity: 1;
+  color: var(--fg);
+  background: rgba(255, 255, 255, 0.98);
+}
+.transcriptTabOpen {
+  right: min(360px, 92vw);
+  opacity: 0.9;
+}
+.transcriptDrawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(360px, 92vw);
+  z-index: 39;
+  background: rgba(253, 253, 252, 0.96);
+  border-left: 1px solid rgba(31, 106, 165, 0.16);
+  backdrop-filter: blur(10px);
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.3s ease;
+  box-shadow: -12px 0 36px rgba(24, 28, 38, 0.18);
+}
+.transcriptDrawerOpen {
+  transform: translateX(0);
+}
+.transcriptHeader {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px 12px 20px;
+  border-bottom: 1px solid rgba(31, 106, 165, 0.1);
+}
+.transcriptTitle {
+  font-size: 13px;
+  letter-spacing: 4px;
+  color: var(--fg-faint);
+}
+.transcriptClose {
+  appearance: none;
+  border: none;
+  background: none;
+  color: var(--fg-faint);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 8px;
+  transition: color 0.2s;
+}
+.transcriptClose:hover {
+  color: var(--fg);
+}
+.transcriptList {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(24, 28, 38, 0.35) transparent;
+}
+.transcriptEmpty {
+  color: var(--fg-faint);
+  font-size: 13.5px;
+  line-height: 1.8;
+  text-align: center;
+  margin: auto 0;
+}
+.transcriptEntry {
+  border-left: 3px solid hsla(var(--entry-hue, 210), 65%, 42%, 0.8);
+  padding: 2px 0 2px 10px;
+  animation: captionIn 0.3s ease-out;
+}
+.transcriptSpeaker {
+  display: block;
+  font-size: 11.5px;
+  letter-spacing: 2px;
+  color: hsla(var(--entry-hue, 210), 60%, 34%, 0.95);
+  margin-bottom: 2px;
+}
+.transcriptText {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--fg);
+}
+.transcriptEntryUser {
+  border-left-color: rgba(176, 122, 15, 0.85);
+  background: rgba(176, 122, 15, 0.06);
+  border-radius: 0 8px 8px 0;
+  padding-right: 8px;
+}
+.transcriptEntryUser .transcriptSpeaker {
+  color: rgba(176, 122, 15, 0.95);
+}
+
+/* ── 情境短片背景 + VR 式底部字幕（DebateStage）────────────────── */
+.stageBgVideo {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  object-fit: cover;
+  z-index: 0;
+  background: #000;
+  pointer-events: none;
+}
+.stageBgDim {
+  /* 影片上再壓一層由下往上的暗角，保住底部字幕與中央球體的可讀性 */
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  /* 黑色半透明罩：整體壓暗影片，底部再深一階保住字幕可讀性 */
+  background:
+    linear-gradient(180deg, rgba(0, 0, 0, 0.5) 0%, rgba(0, 0, 0, 0.38) 40%,
+      rgba(0, 0, 0, 0.68) 100%);
+  pointer-events: none;
+}
+/* 背景層之上的既有內容都墊高一層。
+   注意：fixed 定位的元素（對話紀錄籤/抽屜、底部字幕）必須排除——
+   position: relative 會覆寫它們的 fixed，把抽屜整個擠進頁面流
+   （修過的真實問題：對話紀錄格式跑掉）。 */
+.stage > *:not(.stageBgVideo):not(.stageBgDim):not(.transcriptTab):not(.transcriptDrawer):not(.captionAreaBottom) {
+  position: relative;
+  z-index: 2;
+}
+/* 字幕固定在整個介面最下緣（VR 字幕感：置中、帶陰影、不佔版面） */
+.captionAreaBottom {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 18px;
+  z-index: 30;
+  min-height: 0;
+  pointer-events: none;
+}
+.captionAreaOnVideo .caption,
+.captionAreaOnVideo .captionHint {
+  color: #f5f7fa;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.85), 0 0 4px rgba(0, 0, 0, 0.6);
+}
+.captionAreaOnVideo .captionSpeaker {
+  color: rgba(245, 247, 250, 0.75);
+}
+.captionAreaBottom .caption {
+  max-width: min(860px, 88vw);
+  margin: 0 auto;
+}
+
+/* 線條球 canvas：紙白頁上的深色「內在世界」窗（加法發光需要深底） */
+.orbCanvas {
+  border-radius: var(--radius);
+  box-shadow: 0 10px 32px rgba(24, 28, 38, 0.18);
+}
+
+/* ── 影片背景（stageOnVideo）：黑幕上所有文字/按鈕翻淺色 ──────────
+   紙白主題的深墨文字疊在黑色半透明影片罩上會看不清楚，這個範疇把
+   辯論頁「直接坐在影片上」的元素整組翻成淺色；白底面板（介入面板、
+   輸入框、對話紀錄抽屜）本身有自己的底色，維持原樣。 */
+.stageOnVideo .stageKicker {
+  color: rgba(245, 247, 250, 0.6);
+}
+.stageOnVideo .stageTitle {
+  color: #f5f7fa;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.7);
+}
+.stageOnVideo .stageTopic {
+  color: rgba(245, 247, 250, 0.78);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6);
+}
+.stageOnVideo .btn {
+  color: #f0f3f8;
+  border-color: rgba(255, 255, 255, 0.45);
+  background: rgba(0, 0, 0, 0.35);
+}
+.stageOnVideo .btn:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.55);
+}
+.stageOnVideo .btnIntervene {
+  border-color: rgba(255, 217, 138, 0.65);
+}
+.stageOnVideo .btnSkip {
+  opacity: 0.5;
+  color: rgba(245, 247, 250, 0.85);
+}
+.stageOnVideo .btnSkip:hover:not(:disabled) {
+  opacity: 1;
+}
+.stageOnVideo .choicePanelTitle {
+  color: #f5f7fa;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.7);
+}
+.stageOnVideo .btnChoice {
+  background: rgba(0, 0, 0, 0.45);
+  border-color: hsla(var(--choice-hue), 65%, 60%, 0.65);
+}
+.stageOnVideo .btnChoice:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.65);
+}
+.stageOnVideo .choiceStance {
+  color: hsla(var(--choice-hue), 70%, 70%, 1);
+}
+.stageOnVideo .choiceLabel {
+  color: #f0f3f8;
+}
+.stageOnVideo .captionHint {
+  color: rgba(245, 247, 250, 0.7);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.6);
+}
+.stageOnVideo .intervenePanelTitle {
+  color: var(--fg-dim); /* 面板是白底，維持深字 */
 }

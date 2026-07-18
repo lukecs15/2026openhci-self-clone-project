@@ -375,6 +375,16 @@ async def voice_debate_endpoint(ws: WebSocket, session_id: str):
                     await _send(ws, {"type": "error", "message": "尚未 init_debate_session"})
                     continue
                 await _cancel_debate_task()
+                # final web 會隨 pause 帶上「被打斷那一輪前端實際顯示過的
+                # 句子」（heard_texts），據此把歷史修剪成使用者真正看到的
+                # 內容（不帶就什麼都不做，Unity/舊網頁版行為完全不變）。
+                # 必須在 cancel 之後做：cancel 過程會先處理投機輪的
+                # rollback，這裡再對「播放中被打斷」的那一輪做修剪，
+                # 兩者互不干擾。
+                if msg.heard_texts is not None and msg.agent_id:
+                    session.orchestrator.reconcile_history_with_client(
+                        msg.agent_id, msg.heard_texts
+                    )
 
             elif msg.type == "user_intervene":
                 if session is None or not msg.text:

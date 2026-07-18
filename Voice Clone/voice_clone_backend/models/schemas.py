@@ -414,9 +414,16 @@ class DebateClientMessage(BaseModel):
     topic_title: Optional[str] = None
     agents: Optional[list[AgentConfig]] = None
     text: Optional[str] = None
-    # 只有 turn_played 會帶：前端回報「這一輪播放完成」的 agent_id，純粹供
-    # 後端 log/除錯用，等待機制本身只需要「有沒有收到訊號」，不需要比對值。
+    # turn_played 會帶：前端回報「這一輪播放完成」的 agent_id，純粹供
+    # 後端 log/除錯用；pause_debate（final web）也會帶：被打斷的那位
+    # agent 的 id，搭配下方 heard_texts 做歷史核對。
     agent_id: Optional[str] = None
+    # 只有 pause_debate 可帶（final web 專用，可選）：被打斷的那一輪中，
+    # 前端「實際已顯示給使用者看」的句子列表。後端據此把對話歷史修剪成
+    # 使用者真正看到的內容（見 agents/debate.py 的
+    # reconcile_history_with_client()）。不帶 = 完全維持既有行為，
+    # Unity / 舊網頁版不受影響。
+    heard_texts: Optional[list[str]] = None
     # 只有 user_intervene_audio 會帶：使用者插話的錄音（base64 WAV/PCM，
     # 格式跟一般多 Agent 對話的 user_audio 相同，交給同一套 STTService
     # 處理，見上方「user_intervene_audio」說明）。

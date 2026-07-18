@@ -4,12 +4,12 @@
  * 情境文案來自專案的《情境描述》：同一個晚上的三段連續故事——
  * 工作坊深夜的去留 → 回家路上的阿嬤 → 家門前的那扇門。
  *
- * 圖片：
- *   - image：正式圖片路徑。情境一請把照片存成
- *     public/scenarios/scenario-1.jpg（已接好，放進去就會顯示）；
- *     情境二、三的正式圖片待定，路徑一樣先預留 jpg。
- *   - fallbackImage：正式圖片還沒放（載入 404）時自動退回的佔位 SVG
- *     （ScenarioIntro 的 onError 處理）。
+ * 影像素材（優先序：video → image → fallbackImage）：
+ *   - video：情境短片，放 public/scenarios/scenario-N.mp4。情境導入頁
+ *     以影片展示；辯論頁作為全螢幕半透明背景（VR 感）循環播放。
+ *     檔案還沒放（404）時自動退回 image。
+ *   - image：正式圖片路徑（scenario-N.jpg）。
+ *   - fallbackImage：連圖片都沒放時退回的佔位 SVG。
  *
  * orbStyle：立場克隆形象的線條球骨架（波形設計五種人格骨架）：
  *   'E' 外向（黃綠）擴散環＋星芒 / 'A' 親和（暖橘）鏡像環抱＋雙股主波
@@ -25,6 +25,7 @@ export const SCENARIOS = [
     id: 'workshop-night',
     order: 1,
     title: '我現在該說我可以先回家嗎？',
+    video: '/scenarios/scenario-1.mp4',
     image: '/scenarios/scenario-1.jpg',
     fallbackImage: '/scenarios/scenario-1.svg',
     description:
@@ -65,6 +66,7 @@ export const SCENARIOS = [
     id: 'street-grandma',
     order: 2,
     title: '我現在該停下來幫這位阿嬤嗎？',
+    video: '/scenarios/scenario-2.mp4',
     image: '/scenarios/scenario-2.jpg',
     fallbackImage: '/scenarios/scenario-2.svg',
     description:
@@ -105,6 +107,7 @@ export const SCENARIOS = [
     id: 'door-moment',
     order: 3,
     title: '我現在該推開那扇門嗎？',
+    video: '/scenarios/scenario-3.mp4',
     image: '/scenarios/scenario-3.jpg',
     fallbackImage: '/scenarios/scenario-3.svg',
     description:

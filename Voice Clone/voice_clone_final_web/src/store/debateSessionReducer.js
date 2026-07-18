@@ -80,11 +80,17 @@ export function debateSessionReducer(state, action) {
       }
 
     case 'debate_paused':
+      // 清空「全部」發言者而不是只移除 action.agent_id：被打斷那一輪的
+      // agent_speaking_end 事件已被暫停的 epoch 機制作廢、永遠不會 dispatch，
+      // 只過濾單一 id 會讓被打斷的 agent 永遠留在 activeSpeakerIds 裡——
+      // 介入後新一輪開始時列表變成 [被打斷者, 實際發言者]，取 [0] 的球體
+      // 發光就會指向錯的人（修過的真實問題：介入後「畫面上是被打斷的球在
+      // 講話，聲音卻是另一個立場」）。
       return {
         ...state,
         status: 'paused',
         pausedAgentId: action.agent_id,
-        activeSpeakerIds: state.activeSpeakerIds.filter((id) => id !== action.agent_id),
+        activeSpeakerIds: [],
       }
 
     case 'user_transcript':

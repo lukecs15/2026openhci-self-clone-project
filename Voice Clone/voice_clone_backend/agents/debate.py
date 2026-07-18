@@ -112,6 +112,10 @@ _DEBATE_INSTRUCTION_TEMPLATE = (
     "請保持你（{name}）原本的個性與說話風格回應，每次發言請控制在大約"
     "2 到 4 句話，留一些空間讓對方接話、也讓正在聆聽的使用者有機會隨時"
     "插話參與討論，不要一次講完所有想法。\n"
+    "【用字要求】你說的話會被即時轉成語音唸出來，請只使用日常口語的"
+    "常用字：避免生僻字、罕用字、艱澀成語與文言書面語；也盡量避開"
+    "容易唸錯的破音字用法，能換成白話說法就換（例如與其用「拗不過」"
+    "不如說「說不過他」）。數字、外文縮寫請改用自然的口語講法。\n"
     "【對話歷史格式說明】接下來提供的對話歷史中，每一則發言前面會加上"
     "「顯示名稱：」（例如「{name}：...」或「使用者：...」），這只是用來"
     "標示每一句話是誰說的，不是要你模仿這種格式。你自己回覆時，請直接"
@@ -346,6 +350,56 @@ class DebateOrchestrator:
         del self.history[history_len:]
         self.turn_count = turn_count
         self.current_speaker_id = speaker_id
+
+    def reconcile_history_with_client(self, agent_id: str, heard_texts: list) -> None:
+        """
+        使用者暫停（介入/跳過）時，把「被打斷的那一輪」的對話歷史修剪成
+        前端實際顯示過的內容（final web 的 pause_debate 會帶 heard_texts，
+        見 models/schemas.py；沒帶就完全不會走到這裡，Unity/舊網頁版
+        行為不變）。
+
+        為什麼需要：run_next_turn() 是整輪生成成功才 append 進 history，
+        但前端是逐句顯示/播放——使用者按暫停時，畫面上可能只出現了
+        這一輪的前幾句。若不修剪，插話後的接續回應與判決書會參照
+        「使用者根本沒看到/聽到的後半段」。三種情況：
+          1. 最後一筆 history 是這位 agent（整輪已生成、播放中被打斷）：
+             把該筆內容換成前端實際顯示的句子 + 打斷標記；heard_texts
+             是空的（一句都還沒顯示）則整筆移除並還原輪數/發言者，
+             視同這一輪沒發生（比照 rollback_state 的語意）。
+          2. 最後一筆不是這位 agent（該輪生成中途被取消、沒寫進
+             history，但前端已直通串流顯示了部分句子）：把使用者真正
+             看到的部分補寫進 history（不切換 current_speaker_id，
+             被打斷的那位照舊接續回應）。
+          3. 前端顯示的內容跟 history 完全一致：什麼都不做。
+        """
+        heard = "".join((t or "").strip() for t in (heard_texts or []))
+        interrupted_marker = "……（話說到一半，被使用者打斷）"
+        idx = next(
+            (i for i in range(len(self.history) - 1, -1, -1) if self.history[i].get("role") == "assistant"),
+            None,
+        )
+        last = self.history[idx] if idx is not None else None
+        if last is not None and last.get("agent_id") == agent_id:
+            full_text = (last.get("text") or "").strip()
+            if not heard:
+                del self.history[idx]
+                self.turn_count = max(0, self.turn_count - 1)
+                self.current_speaker_id = agent_id
+            elif heard != full_text:
+                last["text"] = heard + interrupted_marker
+                # 修過的真實問題（final web 實測）：預生成機制下，使用者聽
+                # A 講話時 A 這一輪早已寫入歷史、current_speaker 已切成 B，
+                # 暫停+插話後重啟迴圈開口的是 B——體感是「介入後回應的
+                # 內容像另一個立場」，要再等一輪才輪回被打斷的 A。這裡把
+                # 發言權還給被打斷（話沒說完）的那位，插話後由他接續回應，
+                # 符合「打斷誰、誰回應」的體驗預期。只有 heard_texts 路徑
+                # （final web）會走到這裡，Unity/舊網頁版行為不變。
+                self.current_speaker_id = agent_id
+            return
+        if heard:
+            self.history.append(
+                {"role": "assistant", "agent_id": agent_id, "text": heard + interrupted_marker}
+            )
 
     def inject_user_message(self, text: str) -> None:
         """

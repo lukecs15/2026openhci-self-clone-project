@@ -63,6 +63,12 @@ export function useDebateSession(sessionId) {
   const playSourceRef = useRef(null)
   const eventPipelineRef = useRef(Promise.resolve())
   const dispatchEpochRef = useRef(0)
+  // 介入核對（對照後端 reconcile_history_with_client）：追蹤「目前正在
+  // 顯示/播放的這一輪」實際 dispatch 過的句子。pause 時若該輪還沒播完
+  // （complete=false），把這份清單隨 pause_debate 帶給後端，讓對話歷史
+  // 被修剪成使用者真正看到的內容。complete=true（上一輪已完整播完、
+  // 下一輪還沒開始）時不帶任何東西，後端行為與既有流程完全相同。
+  const heardTurnRef = useRef({ agentId: null, texts: [], complete: true })
 
   const getAudioContext = useCallback(() => {
     if (!audioContextRef.current) {
@@ -189,14 +195,36 @@ export function useDebateSession(sessionId) {
         eventPipelineRef.current = eventPipelineRef.current.then(async () => {
           if (dispatchEpochRef.current !== epoch) return
           dispatch(payload)
+          if (payload.type === 'agent_speaking_start') {
+            heardTurnRef.current = { agentId: payload.agent_id, texts: [], complete: false }
+          }
           if (payload.type === 'agent_speaking_chunk') {
+            // 文字在這個時間點 dispatch = 使用者「看到了」這一句（後端只在
+            // 每句第一個 chunk 附帶文字，剛好一句一筆）
+            if (payload.text) heardTurnRef.current.texts.push(payload.text)
             if (payload.audio) {
               await playAudioChunk(payload.audio, payload.sample_rate)
             }
           } else if (payload.type === 'agent_speaking_end') {
+            heardTurnRef.current.complete = true
             // 這一輪真的播完了 → 回報後端放行（預生成好的）下一輪
             safeSend(buildTurnPlayedMessage(payload.agent_id))
           }
+        })
+        return
+      }
+
+      if (payload.type === 'debate_finished') {
+        // 修過的真實問題：後端等 turn_played 有 20 秒保險逾時（見
+        // routers/ws_debate.py 的 _TURN_ACK_TIMEOUT_SECONDS），某一輪
+        // 音訊超過 20 秒時後端會放棄等待、開始領先於實際播放進度；
+        // 最後 debate_finished 抵達時前端管線裡可能還有好幾句排隊中的
+        // 語音——直接 dispatch 會讓「請做出選擇」在語音還在播時就跳
+        // 出來。改成也排進事件序列化管線：它會等前面所有 chunk 的音訊
+        // 真的播完才 dispatch。刻意「不」檢查 epoch：這是結束訊號，
+        // 就算中途被暫停清了管線，也要照樣送達（此時播放本來就已停止）。
+        eventPipelineRef.current = eventPipelineRef.current.then(() => {
+          dispatch(payload)
         })
         return
       }
@@ -224,7 +252,15 @@ export function useDebateSession(sessionId) {
   const pauseDebate = useCallback(() => {
     // 先讓使用者馬上聽不到聲音，再讓後端 cancel 背景生成（互不依賴順序）
     stopAllPlaybackImmediately()
-    safeSend(buildPauseDebateMessage())
+    // 被打斷的那一輪還沒播完 → 把「實際顯示過的句子」帶給後端核對歷史
+    const heard = heardTurnRef.current
+    if (heard.agentId && !heard.complete) {
+      safeSend(buildPauseDebateMessage(heard.agentId, [...heard.texts]))
+      // 標記已消耗：沒有新一輪開始前再次 pause，不重送同一份舊資料
+      heard.complete = true
+    } else {
+      safeSend(buildPauseDebateMessage())
+    }
   }, [safeSend, stopAllPlaybackImmediately])
 
   const sendIntervention = useCallback(

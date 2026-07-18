@@ -112,7 +112,7 @@ const QUIPS = [
 // 餵給兩個立場 persona 引用/挑戰（見 voice_clone_final_web/src/utils/
 // stancePersona.js 與後端 OnboardingSession.voice_reference_text）。
 const TESTIMONY_PROMPT =
-  '請親口回答:當「人際關係」與「個人責任」發生時間衝突時,你傾向「配合他人」還是「堅持自我需求」?請簡述你的決策理由。'
+  '請回答以下問題:當「人際關係」與「個人責任」發生時間衝突時,你傾向「配合他人」還是「堅持自我需求」?請簡述你的決策理由。 (5~30 秒)'
 
 function formatElapsed(ms) {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000))
@@ -403,12 +403,12 @@ export default function OnboardingFlow() {
     window.location.assign(`/result?session=${encodeURIComponent(resultSessionInput)}`)
   }
 
-  // 依 topicChoice 算出最後要送出的議題字串（'auto' = 空字串，後端自動推導）。
-  const resolveTopic = () => {
-    if (topicChoice === 'preset') return topicPreset
-    if (topicChoice === 'custom') return topicCustom.trim()
-    return ''
-  }
+  // 議題選擇頁已棄用（final web 三情境體驗的議題由各情境自帶，不使用
+  // session.topic_title）。這裡送固定標題而不是空字串：留空會觸發後端
+  // 從錄音逐字稿以 LLM 推導議題（topic_derivation.py），上傳要多等好幾
+  // 秒，對現在的流程是純浪費。topicChoice/topicPreset/topicCustom 狀態
+  // 與 TopicStep 元件保留未刪，之後若要恢復議題選擇可直接接回。
+  const resolveTopic = () => '人際關係與個人責任的兩難抉擇'
 
   const handleFinishTopic = () => {
     if (topicChoice === 'preset' && !topicPreset) {
@@ -447,7 +447,8 @@ export default function OnboardingFlow() {
 
   return (
     <div className="court-app">
-      {step === 'opening' && <CourtOpening onEnter={() => setStep('welcome')} />}
+      {/* 傳票（welcome）頁已依體驗調整棄用：開場動畫結束直接進問卷 */}
+      {step === 'opening' && <CourtOpening onEnter={() => setStep('questionnaire')} />}
 
       {step === 'welcome' && (
         <SummonsStep
@@ -484,7 +485,7 @@ export default function OnboardingFlow() {
           tooShortNotice={tooShortNotice}
           onStart={startRecording}
           onStop={stopRecording}
-          onDone={() => setStep('topic')}
+          onDone={() => setStep('connect') /* 議題選擇頁已棄用：final web 的議題由三個情境決定 */}
         />
       )}
 
@@ -516,7 +517,7 @@ export default function OnboardingFlow() {
 
       {step === 'submitting' && (
         <div className="court-step transfer">
-          <div className="tfTitle serif">移送中…</div>
+          <div className="tfTitle serif">上傳中…</div>
           <div className="tfBody">
             <p>正在建立你的聲音克隆與 5 位自我 agent。</p>
           </div>
@@ -614,7 +615,7 @@ function TrialStep({ courtWavesRef, answers, questionIndex, currentQuestion, law
         ))}
       </div>
       <div className="trialHead">
-        <span className="serif">審訊・心智基因定序</span>
+        <span className="serif">Big Five 人格測驗</span>
         <span className="mono">
           {questionIndex > 0 && (
             <button
@@ -634,14 +635,14 @@ function TrialStep({ courtWavesRef, answers, questionIndex, currentQuestion, law
               ← 上一題
             </button>
           )}
-          證據 {questionIndex + 1} / {BIG_FIVE_QUESTIONS.length}
+          題目 {questionIndex + 1} / {BIG_FIVE_QUESTIONS.length}
         </span>
       </div>
       <div className="stage">
         <LawyerAvatar key={lawyerEvent.seq} event={lawyerEvent} onTap={onLawyerTap} />
         <div className="bubble" key={quip ? `quip-${lawyerEvent.seq}` : currentQuestion.id}>
           <div className="evidenceTag mono">
-            {quip ? '偵查官' : `指控證據 ${String(questionIndex + 1).padStart(2, '0')}`}
+            {quip ? 'Big Five' : `題目 ${String(questionIndex + 1).padStart(2, '0')}`}
           </div>
           <div className="qText">{quip || currentQuestion.text}</div>
         </div>
@@ -684,15 +685,15 @@ function TestimonyStep({ isRecording, audioUrl, recTimeLabel, analyserNode, erro
   // recBtn 文案狀態機（逐邏輯對照 v17 設計稿）：錄音中顯示「停止」，太短
   // 駁回時短暫換成提示文字；錄完變「重新錄口供」（直接重錄，不需要另一顆
   // 按鈕，開始重錄的同時回放列會收起）。
-  let recLabel = '開始錄口供'
-  if (isRecording) recLabel = tooShortNotice ? '口供過短:請至少陳述 5 秒' : '停止'
-  else if (audioUrl) recLabel = '重新錄口供'
+  let recLabel = '開始錄音'
+  if (isRecording) recLabel = tooShortNotice ? '語音過短:請至少陳述 5 秒' : '停止'
+  else if (audioUrl) recLabel = '重新錄音'
 
   return (
     <div className="court-step testimony scroll">
       <BgWash />
-      <div className="tmHead serif">錄口供</div>
-      <div className="tmSub">案發事件口述・你的聲音將提供後續庭審使用</div>
+      <div className="tmHead serif">簡答題</div>
+      <div className="tmSub">請朗讀下面問題並回覆，您的語音樣本將會在體驗中做語音克隆使用</div>
       <div className="prompt">{TESTIMONY_PROMPT}</div>
       <CourtMicVisualizer analyserNode={analyserNode} recording={isRecording} />
       {/* v17：計時移到畫布下方置中（原本藏在 recRow 右側） */}
@@ -712,7 +713,7 @@ function TestimonyStep({ isRecording, audioUrl, recTimeLabel, analyserNode, erro
       {/* tmDone 只在錄完（且沒有在重錄）時掛載，對照設計稿 display:none ↔ block。 */}
       {isDone && (
         <button type="button" className="btn tmDone" style={{ width: '100%' }} onClick={onDone}>
-          具結,呈交證詞
+          上傳資料
         </button>
       )}
       <div className="spacer" />
@@ -903,10 +904,10 @@ function TopicStep({ choice, onChoiceChange, preset, onPresetChange, custom, onC
       {errorMessage && <p className="errorNote">{errorMessage}</p>}
 
       <button type="button" className="btn enter" onClick={onNext} style={{ marginTop: 18 }}>
-        確認案由,前往移送
+        確認資料,前往上傳
       </button>
       <button type="button" className="btn secondary" onClick={onBack}>
-        返回錄口供
+        重錄回覆
       </button>
     </div>
   )
@@ -920,9 +921,9 @@ function ConnectStep({ sessionId, onSessionIdChange, mode, onModeChange, onDecod
   return (
     <div className="court-step transfer scroll">
       <div className="warn mono">FINAL NOTICE</div>
-      <div className="tfTitle serif">移送聯繫</div>
+      <div className="tfTitle serif">上傳資料</div>
       <div className="tfBody">
-        <p>問卷與證詞都已備妥。最後一步:在主系統前掃描畫面上的移送代碼（或手動輸入）,把資料移送過去建立連結。</p>
+        <p>問卷與語音回覆都已備妥。最後一步:在主辦系統前掃描畫面上的QR code（或手動輸入）,把資料上傳過去建立連結。</p>
       </div>
 
       {mode === 'scan' ? (
@@ -952,7 +953,7 @@ function ConnectStep({ sessionId, onSessionIdChange, mode, onModeChange, onDecod
       {errorMessage && <p className="errorNote">{errorMessage}</p>}
 
       <button type="button" className="btn enter" disabled={!sessionId} onClick={onSubmit}>
-        移送並連結
+        上傳並連結
       </button>
     </div>
   )
@@ -963,9 +964,9 @@ function TransferDoneStep({ dominantDim, linkedAgents, onViewResult }) {
   return (
     <div className="court-step transfer scroll">
       <div className="warn mono">FINAL NOTICE</div>
-      <div className="tfTitle serif">強制移送</div>
+      <div className="tfTitle serif">上傳成功</div>
       <div className="tfBody">
-        <p>已確認將代表你出庭辯論的訴訟代理人。</p>
+        <p>已成功上傳資料，請使用體驗裝置進入體驗。</p>
       </div>
       {/* 顏色逐式移植設計稿 tmDone 點擊處理的 hsb(DIMS[best].hue, 60, 88)，
           不是近似的 hsl()：HSB 的 v=88（明度）跟 HSL 的 l=88 是不同色彩模型，
@@ -977,7 +978,7 @@ function TransferDoneStep({ dominantDim, linkedAgents, onViewResult }) {
       <AgentWaveCanvas dim={dominantDim} />
       <div className="tfBody">
         {/* v17 設計稿更新的移送文案 */}
-        <p>請收起手機,戴上 VR 頭盔——進入心智最高法院。在法庭裡,直面那些因你而起的混亂聲音。</p>
+        <p>請收起手機,使用體驗裝置進入體驗。</p>
       </div>
 
       {linkedAgents.length > 0 && (

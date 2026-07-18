@@ -157,7 +157,7 @@ export default function CourtOpening({ onEnter }) {
       }}
     >
       <canvas ref={canvasRef} className="openCanvas" />
-      <div className="openHint">觸 摸 開 庭</div>
+      <div className="openHint">輕 觸 開 始</div>
     </div>
   )
 }

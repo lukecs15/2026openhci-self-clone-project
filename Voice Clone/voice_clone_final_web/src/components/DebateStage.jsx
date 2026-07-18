@@ -23,6 +23,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import LineOrbs from './LineOrbs'
+import TranscriptPanel from './TranscriptPanel'
 import { useDebateSession } from '../hooks/useDebateSession'
 import { buildStanceAgents } from '../utils/stancePersona'
 import { createWavRecorder } from '../utils/wavRecorder'
@@ -50,6 +51,9 @@ export default function DebateStage({ sessionId, session, scenario, onComplete }
   const [isHolding, setIsHolding] = useState(false)
   const [sttPending, setSttPending] = useState(false)
   const [micError, setMicError] = useState('')
+  // 情境短片作為半透明背景（VR 感）；影片還沒放（404）就不渲染背景層
+  const [bgVideoOk, setBgVideoOk] = useState(false)
+  useEffect(() => setBgVideoOk(!!scenario.video), [scenario.id, scenario.video])
   const recorderRef = useRef(null)
   const completedRef = useRef(false)
 
@@ -116,6 +120,16 @@ export default function DebateStage({ sessionId, session, scenario, onComplete }
     [agents, scenario],
   )
 
+  // 對話紀錄面板用：agent_id → 立場名稱與顏色
+  const agentMeta = useMemo(() => {
+    const meta = {}
+    agents.forEach((agent, i) => {
+      const choice = scenario.choices[i === 0 ? 'a' : 'b']
+      meta[agent.agent_id] = { name: choice.stanceName, hue: choice.hue }
+    })
+    return meta
+  }, [agents, scenario])
+
   // ── 提前選擇：立刻靜音 + 中斷後端生成，直接進入選擇面板 ──────────────
   const skipDiscussion = useCallback(() => {
     setSkipToChoice(true)
@@ -179,17 +193,35 @@ export default function DebateStage({ sessionId, session, scenario, onComplete }
     choiceSide && state.status !== 'summary' && state.status !== 'error'
 
   return (
-    <div className="stage">
+    <div className={`stage ${bgVideoOk ? 'stageOnVideo' : ''}`}>
+      {/* 情境短片：全螢幕半透明背景（VR 感），fixed 疊在最底層 */}
+      {bgVideoOk && (
+        <>
+          <video
+            className="stageBgVideo"
+            src={scenario.video}
+            autoPlay
+            loop
+            muted
+            playsInline
+            preload="auto"
+            onError={() => setBgVideoOk(false)}
+          />
+          <div className="stageBgDim" />
+        </>
+      )}
+
       <header className="stageHeader">
         <div className="stageKicker">情境 {scenario.order} / 3</div>
         <h2 className="stageTitle">{scenario.title}</h2>
         <div className="stageTopic">{scenario.question}</div>
       </header>
 
-      <LineOrbs orbs={orbs} speakStateRef={speakStateRef} height={400} />
+      {/* 有影片背景時 canvas 用透明底，讓影片透出 */}
+      <LineOrbs orbs={orbs} speakStateRef={speakStateRef} height={520} transparent={bgVideoOk} />
 
-      {/* 字幕區 */}
-      <div className="captionArea">
+      {/* 字幕區：固定在整個介面最下緣（VR 字幕感） */}
+      <div className={`captionArea captionAreaBottom ${bgVideoOk ? 'captionAreaOnVideo' : ''}`}>
         {state.status === 'connecting' && <p className="captionHint">正在喚醒兩個你的聲音…</p>}
         {state.status === 'ready' && !lastEntry && <p className="captionHint">兩個你正在整理思緒…</p>}
         {lastEntry && state.status !== 'summary' && !showChoicePanel && !waitingVerdict && (
@@ -224,7 +256,7 @@ export default function DebateStage({ sessionId, session, scenario, onComplete }
               disabled={state.status !== 'ready'}
               onClick={skipDiscussion}
             >
-              跳過討論，直接選擇
+              進入選擇
             </button>
           </div>
         )}
@@ -298,6 +330,9 @@ export default function DebateStage({ sessionId, session, scenario, onComplete }
       {state.status === 'error' && (
         <div className="errorNote">連線發生問題：{state.lastError}（請重新整理或呼叫工作人員）</div>
       )}
+
+      {/* 對話紀錄：隱藏式抽屜（右緣直立籤展開），fixed 定位、不佔版面 */}
+      <TranscriptPanel transcript={state.transcript} agentMeta={agentMeta} />
     </div>
   )
 }

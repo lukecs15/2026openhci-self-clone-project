@@ -20,7 +20,7 @@
  */
 
 export const ORB_CONFIG = {
-  bg: '#05070d',
+  bg: '#262626', // 深色「內在世界」窗底（頁面已改紙白，但加法發光視覺必須深底）
   orbRadius: 0.14, // 球半徑（相對畫面短邊；兩顆並排所以比五顆版大一點）
   viewTilt: 0.32,
   perspective: 0.12,
