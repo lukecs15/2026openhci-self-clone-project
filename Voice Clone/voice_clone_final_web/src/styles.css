@@ -50,7 +50,7 @@ body,
   border: 1px solid rgba(31, 106, 165, 0.5);
   background: rgba(31, 106, 165, 0.08);
   color: var(--fg);
-  font-size: 16px;
+  font-size: 20px;
   padding: 12px 28px;
   border-radius: 999px;
   cursor: pointer;
@@ -68,21 +68,21 @@ body,
 }
 .btnPrimary {
   background: rgba(31, 106, 165, 0.22);
-  font-size: 18px;
+  font-size: 20px;
   padding: 14px 44px;
   align-self: center;
 }
 
 .errorNote {
   color: var(--danger);
-  font-size: 14px;
+  font-size: 20px;
   text-align: center;
   margin-top: 10px;
 }
 
 .stageKicker {
   letter-spacing: 6px;
-  font-size: 13px;
+  font-size: 20px;
   color: var(--fg-faint);
   text-transform: uppercase;
   text-align: center;
@@ -106,7 +106,7 @@ body,
 }
 .gateSub {
   color: var(--fg-dim);
-  font-size: 17px;
+  font-size: 24px;
   max-width: 560px;
   line-height: 1.8;
   margin: 0;
@@ -114,7 +114,7 @@ body,
 .gateQuote {
   color: var(--accent);
   font-family: 'Noto Serif TC', serif;
-  font-size: 17px;
+  font-size: 20px;
   max-width: 640px;
   line-height: 1.8;
   margin: 0;
@@ -135,12 +135,12 @@ body,
 }
 .gateHint {
   color: var(--fg-dim);
-  font-size: 16px;
+  font-size: 20px;
   line-height: 1.8;
 }
 .gateHintSmall {
   color: var(--fg-faint);
-  font-size: 13px;
+  font-size: 20px;
 }
 
 /* ── ScenarioIntro ────────────────────────────────── */
@@ -154,7 +154,7 @@ body,
 }
 .introTitle {
   font-family: 'Noto Serif TC', serif;
-  font-size: 34px;
+  font-size: 40px;
   margin: 0;
   letter-spacing: 4px;
 }
@@ -175,20 +175,20 @@ body,
 .introDesc {
   max-width: 680px;
   color: var(--fg);
-  font-size: 17px;
+  font-size: 20px;
   line-height: 2;
   margin: 0;
   text-align: justify;
 }
 .introQuestion {
   font-family: 'Noto Serif TC', serif;
-  font-size: 21px;
+  font-size: 24px;
   color: var(--accent);
   margin: 4px 0 0;
 }
 .introHint {
   color: var(--fg-faint);
-  font-size: 14px;
+  font-size: 20px;
   margin: 0;
 }
 
@@ -204,14 +204,14 @@ body,
 }
 .stageTitle {
   font-family: 'Noto Serif TC', serif;
-  font-size: 26px;
+  font-size: 40px;
   margin: 6px 0 2px;
   letter-spacing: 3px;
   color: var(--fg-dim);
 }
 .stageTopic {
   color: var(--fg-dim);
-  font-size: 15px;
+  font-size: 24px;
 }
 
 .captionArea {
@@ -222,7 +222,7 @@ body,
   padding: 0 8vw;
 }
 .caption {
-  font-size: 19px;
+  font-size: 24px;
   line-height: 1.9;
   text-align: center;
   margin: 0;
@@ -230,7 +230,7 @@ body,
 }
 .captionSpeaker {
   display: block;
-  font-size: 13px;
+  font-size: 20px;
   letter-spacing: 3px;
   color: var(--fg-faint);
   margin-bottom: 4px;
@@ -244,7 +244,7 @@ body,
 }
 .captionHint {
   color: var(--fg-faint);
-  font-size: 15px;
+  font-size: 20px;
   text-align: center;
   animation: pulse 2.4s ease-in-out infinite;
 }
@@ -296,11 +296,11 @@ body,
   backdrop-filter: blur(6px);
 }
 .intervenePanelTitle {
-  font-size: 16px;
+  font-size: 24px;
   color: var(--fg-dim);
 }
 .btnHold {
-  font-size: 18px;
+  font-size: 20px;
   padding: 16px 48px;
   border-color: rgba(31, 106, 165, 0.5);
   user-select: none;
@@ -321,7 +321,7 @@ body,
   border: 1px solid rgba(24, 28, 38, 0.22);
   border-radius: 10px;
   color: var(--fg);
-  font-size: 15px;
+  font-size: 20px;
   padding: 10px 14px;
   outline: none;
 }
@@ -340,7 +340,7 @@ body,
 }
 .choicePanelTitle {
   font-family: 'Noto Serif TC', serif;
-  font-size: 20px;
+  font-size: 24px;
   color: var(--fg);
 }
 .choiceButtons {
@@ -363,12 +363,12 @@ body,
   background: hsla(var(--choice-hue), 70%, 55%, 0.22);
 }
 .choiceStance {
-  font-size: 13px;
+  font-size: 20px;
   letter-spacing: 3px;
   color: hsla(var(--choice-hue), 60%, 32%, 1);
 }
 .choiceLabel {
-  font-size: 17px;
+  font-size: 20px;
 }
 
 /* ── ReportView ───────────────────────────────────── */
@@ -381,14 +381,14 @@ body,
 }
 .reportTitle {
   font-family: 'Noto Serif TC', serif;
-  font-size: 32px;
+  font-size: 40px;
   margin: 0;
   letter-spacing: 4px;
 }
 .reportClosing {
   font-family: 'Noto Serif TC', serif;
   color: var(--accent);
-  font-size: 18px;
+  font-size: 24px;
   max-width: 640px;
   text-align: center;
   line-height: 1.9;
@@ -408,7 +408,7 @@ body,
 }
 .reportCardTitle {
   font-family: 'Noto Serif TC', serif;
-  font-size: 20px;
+  font-size: 24px;
   margin: 8px 0 12px;
   text-align: center;
 }
@@ -419,14 +419,14 @@ body,
   gap: 12px;
 }
 .reportFields dt {
-  font-size: 12px;
+  font-size: 20px;
   letter-spacing: 3px;
   color: var(--fg-faint);
   margin-bottom: 4px;
 }
 .reportFields dd {
   margin: 0;
-  font-size: 14.5px;
+  font-size: 20px;
   line-height: 1.8;
   color: var(--fg);
 }
@@ -482,7 +482,7 @@ body,
   border-radius: 10px 0 0 10px;
   background: rgba(255, 255, 255, 0.88);
   color: var(--fg-dim);
-  font-size: 13px;
+  font-size: 20px;
   letter-spacing: 6px;
   writing-mode: vertical-rl;
   padding: 18px 8px 12px;
@@ -528,7 +528,7 @@ body,
   border-bottom: 1px solid rgba(31, 106, 165, 0.1);
 }
 .transcriptTitle {
-  font-size: 13px;
+  font-size: 20px;
   letter-spacing: 4px;
   color: var(--fg-faint);
 }
@@ -558,7 +558,7 @@ body,
 }
 .transcriptEmpty {
   color: var(--fg-faint);
-  font-size: 13.5px;
+  font-size: 20px;
   line-height: 1.8;
   text-align: center;
   margin: auto 0;
@@ -570,14 +570,14 @@ body,
 }
 .transcriptSpeaker {
   display: block;
-  font-size: 11.5px;
+  font-size: 20px;
   letter-spacing: 2px;
   color: hsla(var(--entry-hue, 210), 60%, 34%, 0.95);
   margin-bottom: 2px;
 }
 .transcriptText {
   margin: 0;
-  font-size: 14px;
+  font-size: 20px;
   line-height: 1.75;
   color: var(--fg);
 }
@@ -707,3 +707,66 @@ body,
 .stageOnVideo .intervenePanelTitle {
   color: var(--fg-dim); /* 面板是白底，維持深字 */
 }
+
+/* ── 粉彩流動底（bgWash，逐字移植 mobile 設計稿）────────────────
+   用於 QR 連結頁 / 五人格覺醒頁 / 情境導入頁：紙白底上五顆 OCEAN
+   粉彩色斑緩慢漂移、微微閃爍。 */
+.bgWash {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  z-index: 0;
+  pointer-events: none;
+}
+.bgWash i {
+  position: absolute;
+  width: 78vw;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--wc) 0%, transparent 62%);
+  opacity: 0.5;
+  will-change: transform;
+}
+.bgWash i:nth-child(1) { --wc: hsl(200, 85%, 82%); top: -18%; left: -22%; animation: drift1 26s ease-in-out infinite alternate, washShimmer 6.5s ease-in-out infinite; }
+.bgWash i:nth-child(2) { --wc: hsl(255, 75%, 86%); top: 4%; right: -26%; animation: drift2 31s ease-in-out infinite alternate, washShimmer 8.2s ease-in-out 1.1s infinite; }
+.bgWash i:nth-child(3) { --wc: hsl(95, 70%, 82%); top: 34%; left: -18%; animation: drift3 23s ease-in-out infinite alternate, washShimmer 5.7s ease-in-out 2.3s infinite; }
+.bgWash i:nth-child(4) { --wc: hsl(34, 90%, 84%); bottom: -14%; right: -16%; animation: drift4 29s ease-in-out infinite alternate, washShimmer 7.4s ease-in-out 0.6s infinite; }
+.bgWash i:nth-child(5) { --wc: hsl(350, 80%, 86%); bottom: -22%; left: 8%; animation: drift5 35s ease-in-out infinite alternate, washShimmer 9.1s ease-in-out 1.8s infinite; }
+@keyframes drift1 { to { transform: translate(14vw, 10vh) scale(1.22); } }
+@keyframes drift2 { to { transform: translate(-12vw, 14vh) scale(1.15); } }
+@keyframes drift3 { to { transform: translate(16vw, -8vh) scale(1.28); } }
+@keyframes drift4 { to { transform: translate(-10vw, -12vh) scale(1.18); } }
+@keyframes drift5 { to { transform: translate(12vw, -10vh) scale(1.12); } }
+@keyframes washShimmer { 0%, 100% { opacity: 0.5; } 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .bgWash i { animation: none; } }
+.gate > *:not(.bgWash),
+.intro > *:not(.bgWash),
+.report > *:not(.bgWash) {
+  position: relative;
+  z-index: 1;
+}
+
+/* ── 玻璃砂按鈕（逐字移植 mobile 設計稿：毛玻璃 + 細顆粒）────────── */
+.btn {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.58), rgba(255, 255, 255, 0.34));
+  backdrop-filter: blur(16px) saturate(1.5);
+  -webkit-backdrop-filter: blur(16px) saturate(1.5);
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  box-shadow: 0 2px 14px rgba(24, 28, 38, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+.btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/><feColorMatrix type='saturate' values='0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  opacity: 0.05;
+  mix-blend-mode: multiply;
+}
+.btn:active:not(:disabled) {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(255, 255, 255, 0.55));
+  border-color: rgba(255, 255, 255, 0.95);
+}
+/* 深色場景（影片上）的按鈕覆寫仍優先生效（選擇器較特定），顆粒層保留 */

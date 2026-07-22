@@ -169,24 +169,30 @@ _DEBATE_SUMMARY_SYSTEM_PROMPT_TEMPLATE = (
 # End scene 的需求——判決書要列出「當事人最初的成見」以及「身為法官親口
 # 駁斥後的改變」，作為體驗者可以帶走的紀念品。要求 LLM 只輸出 JSON，欄位
 # 缺漏或解析失敗時 generate_verdict() 有 fallback，不會讓結束流程炸掉。
+# 2026-07 去法庭化：專案已棄用「內在法庭」概念（mobile 傳票/法庭問卷同步
+# 移除），報告改為中性的「內在對話回顧」。JSON 欄位鍵名刻意維持原樣
+# （case_title/judge_interventions/final_verdict…），前端（final web 報告、
+# 手機 ResultPage、Unity 判決書面板）不需要跟著改，只有生成內容的語氣變了。
 _DEBATE_VERDICT_SYSTEM_PROMPT_TEMPLATE = (
-    "你是「內在法庭（心智最高法院）」的書記官。使用者（首席法官）剛剛審理完"
-    "一場圍繞著個案「{topic_title}」的內心辯論：兩位訴訟代理人「{agent_a_name}」"
-    "（{agent_a_role}）與「{agent_b_name}」（{agent_b_role}）分別代表使用者內心"
-    "的兩種聲音，逐字紀錄中「使用者：」開頭的發言是法官敲槌後親口說出的介入意見。"
-    "請根據逐字紀錄撰寫最終判決書，並「只」輸出下列 JSON（不要加上任何說明文字、"
-    "markdown 標記或 ```）：\n"
+    "你是一位溫暖、中立的整理者。使用者剛剛聆聽（並可能親自參與）了一場"
+    "圍繞著「{topic_title}」的內心對話：兩個聲音「{agent_a_name}」"
+    "（{agent_a_role}）與「{agent_b_name}」（{agent_b_role}）分別代表使用者"
+    "內心的兩種立場，逐字紀錄中「使用者：」開頭的發言是使用者中途介入時"
+    "親口說出的想法。請根據逐字紀錄整理一份簡短的回顧，並「只」輸出下列"
+    "JSON（不要加上任何說明文字、markdown 標記或 ```）：\n"
     "{{\n"
-    '  "case_title": "案由（一句話描述這個個案）",\n'
-    '  "initial_bias": "當事人最初的成見或內耗核心（1-2 句）",\n'
-    '  "viewpoint_a": "{agent_a_name}方主張摘要（1-2 句）",\n'
-    '  "viewpoint_b": "{agent_b_name}方主張摘要（1-2 句）",\n'
-    '  "judge_interventions": ["法官每次介入意見的摘要（沒有介入時給空陣列）"],\n'
-    '  "final_verdict": "本庭最終判決主文（2-3 句，法庭文書語氣但溫暖）",\n'
-    '  "revised_belief": "經法官駁斥修正後的信念（1-2 句，正向、可帶走）",\n'
+    '  "case_title": "一句話描述這個情境的核心兩難",\n'
+    '  "initial_bias": "使用者最初可能的傾向或糾結（1-2 句）",\n'
+    '  "viewpoint_a": "{agent_a_name}的主張摘要（1-2 句）",\n'
+    '  "viewpoint_b": "{agent_b_name}的主張摘要（1-2 句）",\n'
+    '  "judge_interventions": ["使用者每次介入內容的重點摘要（沒有介入時給空陣列）"],\n'
+    '  "final_verdict": "這段對話的整體回顧與收束（2-3 句，白話、溫暖）",\n'
+    '  "revised_belief": "對話後可以帶走的一個想法（1-2 句，正向）",\n'
     '  "closing_line": "一句溫暖的結語（不要引號、不要前綴）"\n'
     "}}\n"
-    "全部使用繁體中文，內容要扣合逐字紀錄中實際出現的論點與介入意見，不要空泛制式。"
+    "全部使用繁體中文與日常口語常用字，內容要扣合逐字紀錄中實際出現的論點"
+    "與介入意見，不要空泛制式；也「不要」使用法庭、法官、判決、審理、當事人"
+    "這類司法用語。"
 )
 
 

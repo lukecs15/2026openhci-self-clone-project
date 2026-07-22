@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useState } from 'react'
+import BgWash from './BgWash'
 
 export default function ScenarioIntro({ scenario, onEnter }) {
   const [videoOk, setVideoOk] = useState(!!scenario.video)
@@ -22,6 +23,7 @@ export default function ScenarioIntro({ scenario, onEnter }) {
 
   return (
     <div className="intro">
+      <BgWash />
       <div className="stageKicker">情境 {scenario.order} / 3</div>
       <h2 className="introTitle">{scenario.title}</h2>
       <div className="introImageWrap">
@@ -51,7 +53,6 @@ export default function ScenarioIntro({ scenario, onEnter }) {
       </div>
       <p className="introDesc">{scenario.description}</p>
       <p className="introQuestion">{scenario.question}</p>
-      <p className="introHint">先別急著回答——先聽聽兩個「你」怎麼說。</p>
       <button type="button" className="btn btnPrimary" onClick={onEnter}>
         進入情境
       </button>

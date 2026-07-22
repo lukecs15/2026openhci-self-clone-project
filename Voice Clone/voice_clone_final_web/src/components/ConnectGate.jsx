@@ -13,6 +13,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import LineOrbs from './LineOrbs'
+import BgWash from './BgWash'
 import { getOnboardingSession, mobileLinkUrl, qrImageUrl } from '../api/onboardingClient'
 
 const POLL_INTERVAL_MS = 2500
@@ -55,16 +56,13 @@ export default function ConnectGate({ sessionId, onLinked }) {
   if (!linkedSession) {
     return (
       <div className="gate">
+        <BgWash />
         <h1 className="gateTitle">Whose Inner Voice?</h1>
         <p className="gateSub">用你自己的聲音，聽見內心兩個立場的對話</p>
         <div className="qrBox">
           <img src={qrImageUrl(linkUrl)} alt="掃碼開始：上傳問卷與聲音樣本" width={280} height={280} />
         </div>
-        <p className="gateHint">
-          請用手機掃描 QR code，完成人格問卷與聲音採集
-          <br />
-          <span className="gateHintSmall">（上傳完成後，這個畫面會自動繼續）</span>
-        </p>
+        <p className="gateHint">用手機掃描 QR code，完成問卷與聲音採集</p>
         {pollError && <div className="errorNote">{pollError}</div>}
       </div>
     )
@@ -72,14 +70,12 @@ export default function ConnectGate({ sessionId, onLinked }) {
 
   return (
     <div className="gate">
+      <BgWash />
       <h1 className="gateTitle">你的五個自我，已經甦醒</h1>
       {/* 深色圓角窗：頁面維持白底，光球區塊用深底（加法發光需要深色
           背景才看得清楚，樣式見 styles.css 的 .orbCanvas） */}
       <LineOrbs orbs={FIVE_SELVES} speakStateRef={idleSpeakRef} height={340} />
-      <p className="gateSub">
-        接下來，你會走進三個情境。每個情境裡，兩個立場的「你」會用你的聲音彼此說服——
-        你可以隨時介入，最後做出你的選擇。
-      </p>
+      <p className="gateSub">三個情境，兩個「你」彼此說服。你可以隨時介入，最後做出選擇。</p>
       <button type="button" className="btn btnPrimary" onClick={() => onLinked(linkedSession)}>
         開始體驗
       </button>

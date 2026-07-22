@@ -7,6 +7,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react'
+import BgWash from './BgWash'
 import { mobileResultUrl, postOnboardingResult, qrImageUrl } from '../api/onboardingClient'
 import { buildResultPayload } from '../utils/report'
 
@@ -34,6 +35,7 @@ export default function ReportView({ sessionId, session, records, onRestart }) {
 
   return (
     <div className="report">
+      <BgWash />
       <h2 className="reportTitle">你的內在對話報告</h2>
       <p className="reportClosing">{payload.summary_text}</p>
 

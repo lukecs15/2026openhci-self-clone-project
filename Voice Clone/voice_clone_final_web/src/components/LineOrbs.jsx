@@ -92,15 +92,18 @@ export default function LineOrbs({ orbs, speakStateRef, height = 420, transparen
 
         // 立場名稱標籤（說話時亮起）
         ctx.globalCompositeOperation = 'source-over'
+        const labelY = cy + R * 1.35
+        const labelGap = Math.max(18, R * 0.38)
+
         ctx.fillStyle = hsbToRgba(orb.hue ?? 0, 45, 88, 45 + sp * 45)
-        ctx.font = `${Math.max(13, R * 0.18)}px "Noto Serif TC", serif`
+        ctx.font = `${Math.max(20, R * 0.2)}px "Noto Serif TC", serif`
         ctx.textAlign = 'center'
         ctx.textBaseline = 'top'
-        ctx.fillText(orb.label || '', cx, cy + R * 1.35)
+        ctx.fillText(orb.label || '', cx, labelY)
         if (orb.subLabel) {
           ctx.fillStyle = hsbToRgba(orb.hue ?? 0, 25, 70, 30 + sp * 30)
-          ctx.font = `${Math.max(11, R * 0.12)}px sans-serif`
-          ctx.fillText(orb.subLabel, cx, cy + R * 1.35 + Math.max(15, R * 0.22))
+          ctx.font = `${Math.max(15, R * 0.13)}px sans-serif`
+          ctx.fillText(orb.subLabel, cx, labelY + labelGap)
         }
         ctx.globalCompositeOperation = 'lighter'
       })
